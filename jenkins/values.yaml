@@ -1,0 +1,14 @@
+controller:
+  numExecutors: 0
+  serviceType: ClusterIP
+  agentListenerEnabled: false
+  initializeOnce: true
+  additionalPlugins:
+    - job-dsl
+    - timestamper
+  JCasC:
+    defaultConfig: false
+agent:
+  enabled: false
+persistence:
+  enabled: true

@@ -1,0 +1,8 @@
+*
+!images/
+!images/tools.Dockerfile
+!fixtures/
+!fixtures/**
+!.local/
+!.local/dist/
+!.local/dist/**

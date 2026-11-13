@@ -1,0 +1,6 @@
+tasks.register('bench') {
+    doLast {
+        println 'BENCH_FIRST_ACTION'
+    }
+}
+defaultTasks 'bench'

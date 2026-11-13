@@ -1,0 +1,67 @@
+jenkins:
+  numExecutors: 0
+  slaveAgentPort: -1
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "${chart-admin-username}"
+          password: "${chart-admin-password}"
+  nodes:
+    - permanent:
+        name: gretl-static
+        labelString: gretl-static
+        mode: EXCLUSIVE
+        numExecutors: 1
+        remoteFS: /home/jenkins/agent
+        launcher:
+          inbound:
+            webSocket: true
+  clouds:
+    - kubernetes:
+        name: laboratory
+        namespace: gretl-jenkins-lab
+        jenkinsUrl: http://jenkins:8080
+        webSocket: true
+        containerCapStr: "4"
+        templates:
+          - &agent
+            name: gretl-dynamic
+            label: gretl-dynamic
+            nodeUsageMode: EXCLUSIVE
+            instanceCap: 4
+            idleMinutes: 0
+            yaml: |
+              apiVersion: v1
+              kind: Pod
+              spec:
+                automountServiceAccountToken: false
+                securityContext:
+                  runAsUser: 1000
+                  runAsGroup: 1000
+                  fsGroup: 1000
+                containers:
+                  - name: jnlp
+                    image: jenkins/inbound-agent:3395.v6e5377b_0fb_3c-4-jdk25
+                    resources:
+                      requests: {cpu: 200m, memory: 256Mi}
+                      limits: {cpu: "1", memory: 512Mi}
+                  - name: gretl
+                    image: gretl-lab-tools:local
+                    imagePullPolicy: Never
+                    command: [sleep]
+                    args: [infinity]
+                    resources:
+                      requests: {cpu: 200m, memory: 1Gi}
+                      limits: {cpu: "1", memory: 3584Mi}
+          - <<: *agent
+            name: gretl-reusable
+            label: gretl-reusable
+            idleMinutes: 15
+          - <<: *agent
+            name: gretl-idle-test
+            label: gretl-idle-test
+            idleMinutes: 1
