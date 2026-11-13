@@ -49,7 +49,7 @@ with open(sys.argv[1]) as stream:
     print(json.dumps({'data': {'gretl.yaml': stream.read()}}))
 PYMAP
 else
-  ./scripts/install-jenkins.sh --values jenkins/j2-values.yaml \
+  ./scripts/install-jenkins.sh --force-conflicts --values jenkins/j2-values.yaml \
     --set-file controller.JCasC.configScripts.lab=.local/j2-casc.yaml \
     --set-file controller.JCasC.configScripts.gretl="$candidate"
   printf '%s\n' "$install_config" > .local/j2-install-config

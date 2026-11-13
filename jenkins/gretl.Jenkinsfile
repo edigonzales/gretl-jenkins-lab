@@ -43,8 +43,7 @@ boolean validDate(value) {
     return day <= [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
 }
 
-def upload(p) {
-    String original = env."J2_${p.name}_FILENAME"
+def upload(p, String original) {
     if (!original) {
         if (p.required) error("Missing upload ${p.name}")
         return null
@@ -209,19 +208,23 @@ timestamps {
     def requester = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause').find { it.userId }?.userId
     def unexpected = params.keySet() - model.parameters.keySet().collect { "J2_${it}".toString() }
     if (unexpected) error("Unexpected parameters: ${unexpected}")
-    def inputs = [:]
-    def uploads = [:]
+    def filenames = [:]
     model.parameters.each { name, p ->
-        if (p.type == 'file') uploads[name] = upload(p)
-        else inputs[name] = scalar(p, params["J2_${name}".toString()])
+        if (p.type == 'file') filenames[name] = env."J2_${name}_FILENAME"
     }
-    def approvals = [:]
-    def artifacts = [:]
-    // Jenkins exports build parameters to subprocesses by default. Keep them in JSON.
+    // Capture plugin metadata before removing exported build parameters from subprocesses.
     def cleared = model.parameters.keySet().collect { "J2_${it}=" }
-    cleared.addAll(uploads.keySet().collect { "J2_${it}_FILENAME=" })
+    cleared.addAll(filenames.keySet().collect { "J2_${it}_FILENAME=" })
     withEnv(cleared) {
         timeout(time: model.execution.timeoutSeconds, unit: 'SECONDS') {
+            def inputs = [:]
+            def uploads = [:]
+            model.parameters.each { name, p ->
+                if (p.type == 'file') uploads[name] = upload(p, filenames[name])
+                else inputs[name] = scalar(p, params["J2_${name}".toString()])
+            }
+            def approvals = [:]
+            def artifacts = [:]
             model.steps.each { step ->
                 stage(step.id) {
                     if (step.approval) approvals[step.id] = approve(model, step, requester)

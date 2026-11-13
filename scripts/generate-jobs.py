@@ -415,12 +415,18 @@ def main():
     parser.add_argument("repository", type=Path)
     parser.add_argument("--ref", default="HEAD")
     parser.add_argument("--runtime", required=True)
+    parser.add_argument("--scripts", action="store_true", help="Print validated job script paths")
     args = parser.parse_args()
     revision = git(args.repository, "rev-parse", "--verify", "--end-of-options", args.ref + "^{commit}")
     url = git(args.repository, "remote", "get-url", "origin")
     require(re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", url),
             "expected a public HTTPS GitHub origin")
     catalog = read_catalog(args.repository, revision)
+    if args.scripts:
+        for definition in catalog.values():
+            if "script" in definition:
+                print(PurePosixPath(definition["source"]).parent / definition["script"])
+        return
     pipeline = (ROOT / "jenkins/gretl.Jenkinsfile").read_text()
     exposed = [d for d in catalog.values() if d.get("exposed", True)]
     active = ", ".join(literal("gretl-" + d["id"]) for d in exposed)
