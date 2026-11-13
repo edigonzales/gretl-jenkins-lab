@@ -12,8 +12,8 @@ fi
 image=$(cat .local/j2-image-ref)
 candidate=$(mktemp .local/j2-jobs.XXXXXX)
 trap 'rm -f "$candidate"' EXIT
-"$python" scripts/generate-jobs.py "$repository" --ref "${JOBS_REF:-HEAD}" --runtime "$image" > "$candidate"
 revision=$(git -C "$repository" rev-parse --verify --end-of-options "${JOBS_REF:-HEAD}^{commit}")
+"$python" scripts/generate-jobs.py "$repository" --ref "$revision" --runtime "$image" > "$candidate"
 if ! git -C "$repository" branch -r --contains "$revision" | grep -q 'origin/'; then
   echo "Publish jobs commit $revision to origin and fetch its tracking branch first" >&2
   exit 1

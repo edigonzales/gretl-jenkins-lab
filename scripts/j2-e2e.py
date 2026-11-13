@@ -31,7 +31,6 @@ class Jenkins:
 
     def call(self, path, form=None, upload=None, expected=(200,)):
         headers = {}
-        self.last_status = None
         data = None
         if form is not None:
             crumb = self.json("/crumbIssuer/api/json")
@@ -54,7 +53,6 @@ class Jenkins:
         except HTTPError as exc:
             response = exc
         with response:
-            self.last_status = response.code
             if response.code not in expected:
                 raise RuntimeError(f"{path}: HTTP {response.code}, expected {expected}")
             return response.read(), response.headers
@@ -64,7 +62,10 @@ class Jenkins:
 
     def start(self, name, form=None, upload=None, parameterized=True):
         endpoint = "buildWithParameters" if parameterized else "build"
-        _, headers = self.call(f"/job/gretl-{name}/{endpoint}", form or {}, upload, expected=(201,))
+        fields = {"J2_" + key: value for key, value in (form or {}).items()}
+        if upload:
+            upload = ("J2_" + upload[0], *upload[1:])
+        _, headers = self.call(f"/job/gretl-{name}/{endpoint}", fields, upload, expected=(201,))
         return urlsplit(headers["Location"]).path
 
 

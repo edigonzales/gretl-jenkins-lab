@@ -16,6 +16,12 @@ ID = r"[a-z0-9]+(?:-[a-z0-9]+)*"
 FIELD = r"[A-Za-z][A-Za-z0-9_]*"
 PATH = r"[A-Za-z0-9_-][A-Za-z0-9_.-]*(?:/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*"
 TYPES = {"text", "multiline", "integer", "boolean", "enum", "date", "file"}
+# Jenkins exports parameter names as environment variables. Reserve an adapter
+# prefix, while retaining the logical V2 names for GRETL and flow bindings.
+def build_parameter(name):
+    return "J2_" + name
+
+
 LOCAL_GROUPS = {
     "console-viewers": ["viewer"],
     "console-operators": ["operator", "dual-role"],
@@ -102,6 +108,7 @@ def parameters(items, limit=32):
         require(matches(name, FIELD, 48) and name not in {"constructor", "prototype", "GRETL_APPROVER", "GRETL_APPROVAL_COMMENT"}
                 and name not in result, f"invalid or duplicate parameter {name!r}")
         require(string(p["label"]) and kind in TYPES, f"{name}: invalid label or type")
+        require(name.upper() not in {key.upper() for key in result}, f"case-insensitive parameter collision: {name}")
         p.setdefault("required", False)
         flag(p, "required")
         require((kind == "file") == ("accept" in p) and (kind == "enum") == ("options" in p),
@@ -122,6 +129,8 @@ def parameters(items, limit=32):
         if "default" in p:
             check_value(p, p["default"])
         result[name] = p
+    upload_metadata = {(name + "_FILENAME").upper() for name, p in result.items() if p["type"] == "file"}
+    require(not (upload_metadata & {name.upper() for name in result}), "parameter collides with upload metadata")
     return result
 
 
@@ -131,7 +140,7 @@ def validate_definition(d, flow, files, path):
     fields(d, required + (" steps" if flow else " runtime script"),
            optional + ("" if flow else " exposed resources outputs onSuccess"), "definition")
     require(type(d["schemaVersion"]) is int and d["schemaVersion"] == 2, "schemaVersion must be 2")
-    require(matches(d["id"], ID, 40), "invalid id")
+    require(matches(d["id"], ID, 40) and d["id"] not in {"reports", "outputs", "inputs", "source", "work"}, "invalid or reserved id")
     require(string(d["name"]) and string(d["description"]), "invalid name or description")
     d["parameters"] = parameters(d.get("parameters", []))
     access = d.setdefault("access", {})
@@ -258,7 +267,8 @@ def validate_flow(flow, jobs):
                     require(target["type"] == "file" and output and (not target["required"] or not output["optional"])
                             and PurePosixPath(output["path"]).suffix.lower() in
                             {ext.lower() for ext in target["accept"]}, f"{label}: incompatible artifact")
-        require(matches(step["id"], ID, 40) and step["id"] not in previous, "invalid or duplicate step id")
+        require(matches(step["id"], ID, 40) and step["id"] not in previous
+                and step["id"] not in {"reports", "outputs", "inputs", "source", "work"}, "invalid, reserved or duplicate step id")
         previous[step["id"]] = step
 
 
@@ -333,7 +343,7 @@ def choices(p):
 
 
 def render_parameter(p):
-    name, label = literal(p["name"]), literal(p["label"])
+    name, label = literal(build_parameter(p["name"])), literal(p["label"])
     kind = p["type"]
     if kind == "file":
         return f"stashedFile {{ name({name}); description({label}) }}"
@@ -376,7 +386,7 @@ def render(d, catalog, url, revision, runtime, pipeline):
     script = pipeline.replace("'@MODEL@'", literal(payload), 1)
     encoded = base64.b64encode(script.encode()).decode()
     lines = [f"pipelineJob({literal('gretl-' + d['id'])}) {{", f"  displayName({literal(d['name'])})",
-             f"  description({literal(d['description'])})"]
+             f"  description({literal(d['description'])})", "  disabled(false)"]
     if d["parameters"]:
         lines += ["  parameters {", *("    " + render_parameter(p) for p in d["parameters"].values()), "  }"]
     if d["execution"]["serial"] or grants or "schedule" in d:
@@ -411,8 +421,18 @@ def main():
             "expected a public HTTPS GitHub origin")
     catalog = read_catalog(args.repository, revision)
     pipeline = (ROOT / "jenkins/gretl.Jenkinsfile").read_text()
-    script = "\n\n".join(render(d, catalog, url, revision, args.runtime, pipeline)
-                         for d in catalog.values() if d.get("exposed", True))
+    exposed = [d for d in catalog.values() if d.get("exposed", True)]
+    active = ", ".join(literal("gretl-" + d["id"]) for d in exposed)
+    scripts = [render(d, catalog, url, revision, args.runtime, pipeline) for d in exposed]
+    # Preserve previous run histories while withdrawing jobs removed from the catalog.
+    scripts.append(f"""jenkins.model.Jenkins.get().items.findAll {{
+    it.class.name == "org.jenkinsci.plugins.workflow.job.WorkflowJob" &&
+        it.name.startsWith('gretl-') && !(it.name in [{active}])
+}}.each {{ item ->
+    item.setDisabled(true)
+    item.save()
+}}""")
+    script = "\n\n".join(scripts)
     print(yaml.safe_dump({"jobs": [{"script": script + "\n"}]}, sort_keys=False), end="")
 
 

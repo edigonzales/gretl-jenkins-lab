@@ -41,9 +41,12 @@ PY
 # The first install adds plugins. Later deployments only change the Job DSL ConfigMap.
 if jenkins get cm jenkins-jenkins-config-gretl >/dev/null 2>&1 &&
    cmp -s .local/j2-casc.yaml .local/j2-casc-applied.yaml; then
-  jenkins create configmap jenkins-jenkins-config-gretl --from-file=gretl.yaml="$candidate" \
-    --dry-run=client -o yaml | jenkins apply --server-side --force-conflicts -f -
-  jenkins label configmap jenkins-jenkins-config-gretl jenkins-jenkins-config=true --overwrite
+  "$python" - "$candidate" <<'PYMAP' | jenkins patch configmap jenkins-jenkins-config-gretl --type=merge --patch-file=/dev/stdin
+import json
+import sys
+with open(sys.argv[1]) as stream:
+    print(json.dumps({'data': {'gretl.yaml': stream.read()}}))
+PYMAP
 else
   ./scripts/install-jenkins.sh --values jenkins/j2-values.yaml \
     --set-file controller.JCasC.configScripts.lab=.local/j2-casc.yaml \

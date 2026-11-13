@@ -44,7 +44,7 @@ boolean validDate(value) {
 }
 
 def upload(p) {
-    String original = env."${p.name}_FILENAME"
+    String original = env."J2_${p.name}_FILENAME"
     if (!original) {
         if (p.required) error("Missing upload ${p.name}")
         return null
@@ -101,8 +101,8 @@ def materialize(name, binding, inputs, uploads, approvals, artifacts) {
         String extension = uploads[binding.fromInput]
         if (!extension) return null
         dir('inputs') {
-            dir(name) { unstash(binding.fromInput) }
-            withEnv(["UPLOAD_SOURCE=${name}/${binding.fromInput}", "UPLOAD_TARGET=${name}${extension}"]) {
+            dir(name) { unstash("J2_${binding.fromInput}") }
+            withEnv(["UPLOAD_SOURCE=${name}/J2_${binding.fromInput}", "UPLOAD_TARGET=${name}${extension}"]) {
                 sh 'mv -- "$UPLOAD_SOURCE" "$UPLOAD_TARGET"'
             }
         }
@@ -207,19 +207,19 @@ timestamps {
     currentBuild.description = "${model.id} @ ${model.revision.take(12)}"
     echo "GRETL ${model.id} build ${env.BUILD_NUMBER} source ${model.url}@${model.revision} runtime ${model.runtime}"
     def requester = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause').find { it.userId }?.userId
-    def unexpected = params.keySet() - model.parameters.keySet()
+    def unexpected = params.keySet() - model.parameters.keySet().collect { "J2_${it}".toString() }
     if (unexpected) error("Unexpected parameters: ${unexpected}")
     def inputs = [:]
     def uploads = [:]
     model.parameters.each { name, p ->
         if (p.type == 'file') uploads[name] = upload(p)
-        else inputs[name] = scalar(p, params[name])
+        else inputs[name] = scalar(p, params["J2_${name}".toString()])
     }
     def approvals = [:]
     def artifacts = [:]
     // Jenkins exports build parameters to subprocesses by default. Keep them in JSON.
-    def cleared = model.parameters.keySet().collect { "${it}=" }
-    cleared.addAll(uploads.keySet().collect { "${it}_FILENAME=" })
+    def cleared = model.parameters.keySet().collect { "J2_${it}=" }
+    cleared.addAll(uploads.keySet().collect { "J2_${it}_FILENAME=" })
     withEnv(cleared) {
         timeout(time: model.execution.timeoutSeconds, unit: 'SECONDS') {
             model.steps.each { step ->
