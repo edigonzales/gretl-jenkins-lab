@@ -119,7 +119,9 @@ def durations(row, details, markers):
     tail = delta(at('pipeline-end'), at('runtime-end'))
     total = details.get('elapsed_ms')
     preparation = delta(at('runtime-start'), ready)
-    setup = preparation - (workspace or 0) - (checkout or 0) if preparation is not None else None
+    checkout_time = 0 if row['checkout'] == 'none' else checkout
+    setup = (preparation - workspace - checkout_time
+             if None not in (preparation, workspace, checkout_time) else None)
     pipeline_elapsed = delta(at('pipeline-end'), details.get('sent'))
     finish = total - pipeline_elapsed if None not in (total, pipeline_elapsed) else None
     row.update(submit_ms=delta(accepted, details.get('sent')),
@@ -149,7 +151,9 @@ def run(call, scenario, iteration, daemon):
         deadline = time.monotonic() + 90
         while True:
             computers = json.loads(call('/computer/api/json?tree=computer[displayName,idle,offline]')[0])['computer']
-            matching = [c for c in computers if c['displayName'].startswith('gretl-' + agent)]
+            prefix = 'gretl-' + agent
+            matching = [c for c in computers if c['displayName'] == prefix or
+                        c['displayName'].startswith(prefix + '-')]
             if scenario == 'B1':
                 ready = not matching
             elif scenario.startswith('A') or scenario == 'IDLE':
@@ -161,6 +165,7 @@ def run(call, scenario, iteration, daemon):
             if time.monotonic() >= deadline:
                 raise TimeoutError('agent precondition did not become ready')
             time.sleep(1)
+        before = pods()
         observed = dict(before)
         details['sent'] = time.time_ns() // 1000000
         start = time.monotonic()
@@ -208,9 +213,11 @@ def run(call, scenario, iteration, daemon):
             if any(e['reason'] == 'Pulling' for e in events):
                 row['image_cache'] = 'pull'
             else:
-                cached = sum(e['reason'] == 'Pulled' and 'already present' in e['message']
-                             for e in events)
-                row['image_cache'] = 'cached' if cached >= len(details['pod']['spec']['containers']) else 'unknown'
+                cached = {e['involvedObject'].get('fieldPath') for e in events
+                          if e['reason'] == 'Pulled' and 'already present' in e['message']}
+                containers = {'spec.containers{' + c['name'] + '}'
+                              for c in details['pod']['spec']['containers']}
+                row['image_cache'] = 'cached' if containers <= cached else 'unknown'
         elif details['pod']:
             row['image_cache'] = 'running'
         row['status'] = details['build']['result']
@@ -254,12 +261,17 @@ def main():
         parser.error('choose a positive iteration count and scenarios ' + ', '.join(SCENARIOS))
     if kube('config', 'current-context').strip() != 'k3d-' + LAB:
         parser.error('unexpected Kubernetes context')
+    dirty = subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip()
+    if dirty:
+        parser.error('commit the laboratory configuration before recording measurements')
     output = args.output / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     output.mkdir(parents=True)
     call = connection(f'http://127.0.0.1:{args.port}')
     metadata = {
         'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
-        'dirty': bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip()),
+        'dirty': False,
+        'context': 'k3d-' + LAB,
+        'jenkins': f'http://127.0.0.1:{args.port}',
         'started': datetime.now().astimezone().isoformat(),
         'scenarios': scenarios, 'iterations': args.iterations, 'daemon': args.daemon,
         'architecture': os.uname().machine,
