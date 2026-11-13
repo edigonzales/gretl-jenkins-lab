@@ -1,0 +1,87 @@
+properties([
+    disableConcurrentBuilds(),
+    parameters([
+        choice(name: 'AGENT', choices: ['dynamic', 'reusable', 'static', 'idle-test']),
+        choice(name: 'RUNTIME', choices: ['shell', 'gradle', 'legacy', 'cli']),
+        choice(name: 'CHECKOUT', choices: ['none', 'small', 'monorepo']),
+        booleanParam(name: 'DAEMON', defaultValue: false)
+    ])
+])
+
+def mark(name, value = '') {
+    echo "BENCH ${name} ${System.currentTimeMillis()} ${value}"
+}
+
+def runFixture() {
+    mark('pod', sh(script: 'hostname', returnStdout: true).trim())
+    if (params.CHECKOUT != 'none') {
+        mark('checkout-start')
+        def small = params.CHECKOUT == 'small'
+        def url = small ? 'https://github.com/edigonzales/gretl-jenkins-lab.git' :
+                          'https://github.com/sogis/gretljobs.git'
+        def revision = small ? '02f3f8cbe0dcd0dbb1495e29a15c026361159fd5' :
+                               '21c446c247f6a56fb2211c4ccb2e902d277b424e'
+        dir('checkout') {
+            checkout scmGit(branches: [[name: revision]], userRemoteConfigs: [[url: url]])
+            mark('revision', sh(script: 'git rev-parse HEAD', returnStdout: true).trim())
+        }
+        mark('checkout-end')
+    }
+    withEnv(["BENCH_DAEMON=${params.DAEMON}", "BENCH_RUNTIME=${params.RUNTIME}"]) {
+        sh '''
+            set -eu
+            mark() { printf 'BENCH %s %s\\n' "$1" "$(date +%s%3N)"; }
+            case "$BENCH_RUNTIME" in
+                gradle)
+                    export JAVA_HOME=/opt/java11 PATH="/opt/java11/bin:$PATH"
+                    cp /opt/bench/build.gradle .
+                    mode=--no-daemon
+                    [ "$BENCH_DAEMON" = false ] || mode=--daemon
+                    set -- /opt/gradle/bin/gradle "$mode" --console=plain --quiet
+                    ;;
+                legacy)
+                    export JAVA_HOME=/opt/java11 PATH="/opt/java11/bin:$PATH"
+                    set -- /opt/gradle/bin/gradle --init-script /home/gradle/init.gradle \
+                        --no-daemon --console=plain --quiet -p checkout/agi_dummy
+                    ;;
+                cli) set -- /opt/gretl/bin/gretl run /opt/bench/job.groovy ;;
+                shell) set -- printf '%s\\n' BENCH_FIRST_ACTION ;;
+            esac
+            mkfifo bench-output
+            (
+                while IFS= read -r line; do
+                    case "$line" in
+                        BENCH_FIRST_ACTION|*"Script message [gretl.script.message]: BENCH_FIRST_ACTION "*|"Hallo Welt") mark first-action ;;
+                    esac
+                    printf '%s\\n' "$line"
+                done < bench-output
+            ) &
+            reader=$!
+            mark runtime-start
+            result=0
+            "$@" > bench-output 2>&1 || result=$?
+            wait "$reader"
+            mark runtime-end
+            exit "$result"
+        '''
+    }
+}
+
+timestamps {
+    node("gretl-${params.AGENT}") {
+        mark('agent-ready', env.NODE_NAME)
+        try {
+            mark('workspace-start')
+            deleteDir()
+            mark('workspace-end')
+            if (params.AGENT == 'static') {
+                runFixture()
+            } else {
+                container('gretl') { runFixture() }
+            }
+        } finally {
+            deleteDir()
+            mark('pipeline-end')
+        }
+    }
+}
