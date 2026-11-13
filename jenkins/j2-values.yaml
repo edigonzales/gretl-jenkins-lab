@@ -1,8 +1,8 @@
 controller:
   initializeOnce: false
   additionalPlugins:
-    - job-dsl
-    - timestamper
+    - job-dsl:3732.v9a_c49a_61a_313
+    - timestamper:1.30
     - file-parameters:433.va_0b_80359d54d
     - matrix-auth:3.3
     - pipeline-utility-steps:3.810.va_7672d206740

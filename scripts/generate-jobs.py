@@ -382,6 +382,7 @@ def render(d, catalog, url, revision, runtime, pipeline):
     jobs = {s["job"]: catalog[s["job"]] for s in steps if "job" in s}
     model = dict(id=d["id"], url=url, revision=revision, runtime=runtime, jobs=jobs, steps=steps,
                  execution=d["execution"], parameters=d["parameters"], submitters=",".join(submitters))
+    require(pipeline.count("'@MODEL@'") == 1, "expected one pipeline model placeholder")
     payload = json.dumps(model, ensure_ascii=True)
     script = pipeline.replace("'@MODEL@'", literal(payload), 1)
     encoded = base64.b64encode(script.encode()).decode()

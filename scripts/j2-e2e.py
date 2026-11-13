@@ -21,6 +21,12 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
+class JenkinsError(RuntimeError):
+    def __init__(self, path, status, expected):
+        super().__init__(f"{path}: HTTP {status}, expected {expected}")
+        self.status = status
+
+
 class Jenkins:
     def __init__(self, port, user, password):
         self.base = f"http://127.0.0.1:{port}"
@@ -54,7 +60,7 @@ class Jenkins:
             response = exc
         with response:
             if response.code not in expected:
-                raise RuntimeError(f"{path}: HTTP {response.code}, expected {expected}")
+                raise JenkinsError(path, response.code, expected)
             return response.read(), response.headers
 
     def json(self, path):
@@ -65,7 +71,7 @@ class Jenkins:
         fields = {"J2_" + key: value for key, value in (form or {}).items()}
         if upload:
             upload = ("J2_" + upload[0], *upload[1:])
-        _, headers = self.call(f"/job/gretl-{name}/{endpoint}", fields, upload, expected=(201,))
+        _, headers = self.call(f"/job/gretl-{name}/{endpoint}", fields, upload, expected=(201, 303))
         return urlsplit(headers["Location"]).path
 
 
@@ -76,6 +82,9 @@ def poll(check, seconds=180):
             result = check()
             if result:
                 return result
+        except JenkinsError as exc:
+            if exc.status not in (502, 503, 504):
+                raise
         except (URLError, ConnectionError):
             pass
         time.sleep(1)

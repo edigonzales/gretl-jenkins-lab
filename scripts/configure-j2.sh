@@ -38,9 +38,10 @@ agent['yaml'] = yaml.safe_dump(pod)
 templates.append(agent)
 yaml.safe_dump(config, sys.stdout, sort_keys=False)
 PY
+install_config=$(shasum -a 256 .local/j2-casc.yaml jenkins/values.yaml jenkins/j2-values.yaml scripts/install-jenkins.sh)
 # The first install adds plugins. Later deployments only change the Job DSL ConfigMap.
 if jenkins get cm jenkins-jenkins-config-gretl >/dev/null 2>&1 &&
-   cmp -s .local/j2-casc.yaml .local/j2-casc-applied.yaml; then
+   [[ $(cat .local/j2-install-config 2>/dev/null || true) == "$install_config" ]]; then
   "$python" - "$candidate" <<'PYMAP' | jenkins patch configmap jenkins-jenkins-config-gretl --type=merge --patch-file=/dev/stdin
 import json
 import sys
@@ -51,5 +52,5 @@ else
   ./scripts/install-jenkins.sh --values jenkins/j2-values.yaml \
     --set-file controller.JCasC.configScripts.lab=.local/j2-casc.yaml \
     --set-file controller.JCasC.configScripts.gretl="$candidate"
-  cp .local/j2-casc.yaml .local/j2-casc-applied.yaml
+  printf '%s\n' "$install_config" > .local/j2-install-config
 fi

@@ -50,7 +50,8 @@ The legacy case runs only the pinned and inspected `agi_dummy` build.
 
 Das Deployment liest die **committeten** V2-Definitionen des
 Schwester-Checkouts `gretl-runtime-jobs`. Die Revision muss über dessen
-GitHub-Origin erreichbar sein. `JOBS_REF` wählt einen administrativen Ref.
+GitHub-Origin erreichbar sein. Standard ist `jenkins/j2-jobs-ref`.
+`JOBS_REF` überschreibt die Vorgabe für ein administratives Deployment.
 `JOBS_REPOSITORY` wählt den Checkout. Jenkins verwendet während des gesamten
 Builds denselben Git-SHA. Das erste Deployment installiert die zusätzlichen
 Plugins. Folgende Katalog-Deployments aktualisieren die Job-DSL-ConfigMap
@@ -88,6 +89,10 @@ python3 -m venv .local/j2-browser
 Für `--restart` muss der lokale Port-Forward nach dem Podwechsel erneut
 gestartet werden. Er kann für den Test in einer Schleife laufen.
 Agenten bleiben nach einem fachlichen Schritt bis zu 15 Minuten wiederverwendbar.
+J2 verwendet ein gemeinsames CPU- und RAM-Profil für den wiederverwendbaren
+Agenten. Die V2-Ressourcenangaben werden von der Kubernetes Job Console
+ausgewertet. HTTP-Clients verwenden die generierten Jenkins-Namen mit
+Präfix `J2_`, etwa `J2_inputFile`.
 Jenkins hält während eines Input-Schritts keinen Executor. Serielle Flows
 behalten ihren Platz bis zum Abschluss inklusive Freigabe. Stashes liegen im
 Jenkins-Home. Der Laufbericht des generischen Runtime-Image-Builders steht in
