@@ -157,7 +157,14 @@ def validate_definition(d, flow, files, path):
         cron = schedule["cron"]
         require(isinstance(cron, str) and len(cron.split()) == 5
                 and re.fullmatch(r"[A-Za-z0-9*/(),?\- \t]+", cron), "invalid schedule.cron")
-        schedule["cron"] = " ".join(cron.replace("?", "*").split())
+        aliases = ("JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".split(),
+                   "SUN MON TUE WED THU FRI SAT".split())
+        cron_fields = cron.upper().replace("?", "*").split()
+        for index, names in enumerate(aliases, start=3):
+            for number, alias in enumerate(names, start=1 if index == 3 else 0):
+                cron_fields[index] = cron_fields[index].replace(alias, str(number))
+        schedule["cron"] = " ".join(cron_fields)
+        validate_cron(schedule["cron"])
         require(all(p["type"] != "file" and (not p["required"] or "default" in p)
                     for p in d["parameters"].values()), "schedule requires defaults and cannot upload files")
     if flow:
@@ -255,6 +262,18 @@ def validate_flow(flow, jobs):
         previous[step["id"]] = step
 
 
+def validate_cron(cron):
+    """Check the Jenkins numeric grammar and ranges before loading Job DSL."""
+    for field, (low, high) in zip(cron.split(), [(0, 59), (0, 23), (1, 31), (1, 12), (0, 7)]):
+        for item in field.split(","):
+            match = re.fullmatch(r"(?:H(?:\(([0-9]+)-([0-9]+)\))?|\*|([0-9]+)(?:-([0-9]+))?)(?:/([0-9]+))?", item)
+            require(match, f"invalid schedule.cron field {item}")
+            start, end, first, last, step = match.groups()
+            bounds = [int(number) for number in (start, end, first, last) if number is not None]
+            require(all(low <= number <= high for number in bounds) and bounds == sorted(bounds)
+                    and (step is None or 1 <= int(step) <= high - low + 1), f"invalid schedule.cron range {item}")
+
+
 def git(repository, *args):
     return subprocess.check_output(["git", "-C", str(repository), *args], text=True).rstrip("\n")
 
@@ -267,6 +286,9 @@ def read_catalog(repository, revision):
         if not flow and not re.fullmatch(r"jobs/[^/]+/job\.yaml", path):
             continue
         try:
+            require(matches(path, PATH, 240), "unsupported catalog path")
+            require(git(repository, "ls-tree", revision, path).startswith(("100644 blob ", "100755 blob ")),
+                    "definition must be a regular Git file")
             d = yaml.load(git(repository, "show", f"{revision}:{path}"), Loader=CatalogLoader)
             validate_definition(d, flow, files, path)
             require(d["id"] not in catalog, f"duplicate id {d['id']}")
@@ -331,8 +353,7 @@ def principals(grant):
     return [("USER", user) for user in sorted(users)] + [("GROUP", group) for group in groups]
 
 
-def render(d, catalog, url, revision, runtime):
-    pipeline = (ROOT / "jenkins/gretl.Jenkinsfile").read_text()
+def render(d, catalog, url, revision, runtime, pipeline):
     steps = d.get("steps") or [{"id": d["id"], "job": d["id"], "inputs": {
         name: {"fromInput": name} for name in d["parameters"]
     }}]
@@ -389,7 +410,8 @@ def main():
     require(re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", url),
             "expected a public HTTPS GitHub origin")
     catalog = read_catalog(args.repository, revision)
-    script = "\n\n".join(render(d, catalog, url, revision, args.runtime)
+    pipeline = (ROOT / "jenkins/gretl.Jenkinsfile").read_text()
+    script = "\n\n".join(render(d, catalog, url, revision, args.runtime, pipeline)
                          for d in catalog.values() if d.get("exposed", True))
     print(yaml.safe_dump({"jobs": [{"script": script + "\n"}]}, sort_keys=False), end="")
 

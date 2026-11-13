@@ -43,6 +43,7 @@ if jenkins get cm jenkins-jenkins-config-gretl >/dev/null 2>&1 &&
    cmp -s .local/j2-casc.yaml .local/j2-casc-applied.yaml; then
   jenkins create configmap jenkins-jenkins-config-gretl --from-file=gretl.yaml="$candidate" \
     --dry-run=client -o yaml | jenkins apply --server-side --force-conflicts -f -
+  jenkins label configmap jenkins-jenkins-config-gretl jenkins-jenkins-config=true --overwrite
 else
   ./scripts/install-jenkins.sh --values jenkins/j2-values.yaml \
     --set-file controller.JCasC.configScripts.lab=.local/j2-casc.yaml \

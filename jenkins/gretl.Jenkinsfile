@@ -35,16 +35,16 @@ def scalar(p, value) {
 boolean validDate(value) {
     if (!(value instanceof String) || !(value ==~ /[0-9]{4}-[0-9]{2}-[0-9]{2}/) ||
             value.startsWith('0000')) return false
-    // Calendar validation with Groovy's supported date parser.
-    try {
-        return Date.parse('yyyy-MM-dd', value).format('yyyy-MM-dd') == value
-    } catch (java.text.ParseException ignored) {
-        return false
-    }
+    int year = value.substring(0, 4).toInteger()
+    int month = value.substring(5, 7).toInteger()
+    int day = value.substring(8, 10).toInteger()
+    if (month < 1 || month > 12 || day < 1) return false
+    boolean leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+    return day <= [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
 }
 
 def upload(p) {
-    String original = env["${p.name}_FILENAME"]
+    String original = env."${p.name}_FILENAME"
     if (!original) {
         if (p.required) error("Missing upload ${p.name}")
         return null
@@ -94,7 +94,7 @@ def materialize(name, binding, inputs, uploads, approvals, artifacts) {
         def ref = binding.fromArtifact
         String path = artifacts[ref.step][ref.name]
         if (!path) return null
-        dir("inputs/${name}") { unstash("output-${ref.step}-${ref.name}") }
+        dir("inputs/${name}") { unstash("output.${ref.step}.${ref.name}") }
         return "${pwd()}/inputs/${name}/${path}"
     }
     if (binding.fromInput in uploads.keySet()) {
@@ -184,7 +184,11 @@ def runJob(model, step, inputs, uploads, approvals, artifacts) {
                             sh 'mkdir -p -- "$(dirname -- "$STAGE_ARTIFACT")" && cp -- "$OUTPUT_FILE" "$STAGE_ARTIFACT"'
                         }
                         archiveArtifacts(artifacts: "${step.id}/${out.path}", followSymlinks: false)
-                        dir('outputs') { stash(name: "output-${step.id}-${out.name}", includes: out.path) }
+                        if (model.steps.any { later ->
+                            later.inputs?.values()?.any { it.fromArtifact?.step == step.id && it.fromArtifact?.name == out.name }
+                        }) {
+                            dir('outputs') { stash(name: "output.${step.id}.${out.name}", includes: out.path) }
+                        }
                         produced[out.name] = out.path
                     }
                 }
@@ -213,11 +217,16 @@ timestamps {
     }
     def approvals = [:]
     def artifacts = [:]
-    timeout(time: model.execution.timeoutSeconds, unit: 'SECONDS') {
-        model.steps.each { step ->
-            stage(step.id) {
-                if (step.approval) approvals[step.id] = approve(model, step, requester)
-                else artifacts[step.id] = runJob(model, step, inputs, uploads, approvals, artifacts)
+    // Jenkins exports build parameters to subprocesses by default. Keep them in JSON.
+    def cleared = model.parameters.keySet().collect { "${it}=" }
+    cleared.addAll(uploads.keySet().collect { "${it}_FILENAME=" })
+    withEnv(cleared) {
+        timeout(time: model.execution.timeoutSeconds, unit: 'SECONDS') {
+            model.steps.each { step ->
+                stage(step.id) {
+                    if (step.approval) approvals[step.id] = approve(model, step, requester)
+                    else artifacts[step.id] = runJob(model, step, inputs, uploads, approvals, artifacts)
+                }
             }
         }
     }
