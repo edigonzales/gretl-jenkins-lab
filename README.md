@@ -109,3 +109,36 @@ nacheinander auf dem dedizierten Labor aus.
 .local/j2-venv/bin/python scripts/j2-acceptance.py --port 18082 \
   --evidence ../gretl-jenkins-spec/evidence/acceptance-extra
 ```
+
+## GRETL Console (J3)
+
+Die Console wird als Jenkins-Plugin im vorhandenen Labor installiert.
+
+```sh
+mvn -f console-plugin/pom.xml verify
+./scripts/deploy-jobs.sh
+./scripts/install-console.sh
+```
+
+Öffne [GRETL Console](http://127.0.0.1:18082/gretl-console/) im Labor.
+Die Console zeigt für die aktuelle Jenkins-Anmeldung lesbare GRETL-Jobs.
+Operatoren können sie aus dem Formular starten. Die Eingabemaske verwendet
+Datumsauswahl, numerische Felder und die fachlichen Auswahlbezeichnungen aus
+Schema V2. Die Historie verlinkt die nativen Buildlogs, Artefakte und offenen
+Freigaben. Die Rollen und Zugangsdaten entsprechen J2.
+
+Der Generator schreibt die Anzeigemetadaten beim Deployment in die
+Jobdefinition. Die Formulare senden direkt an den nativen Jenkins-Build-Endpunkt.
+Dateien verarbeitet das File Parameter Plugin. Zeitpläne, Queue, Revision und
+Freigaben folgen der bereitgestellten J2-Konfiguration. Der Git-Link zeigt den
+bereitgestellten Commit. Ein anderer Ref wird durch den administrativen
+`JOBS_REF`-Deploymentpfad ausgewählt.
+
+`install-console.sh` ersetzt das Plugin auf dem bestehenden PVC und startet
+den Jenkins-Controller neu. Das Browser-Skript nutzt die Playwright-Umgebung
+aus J2.
+
+```sh
+.local/j2-browser/bin/python scripts/j3-browser.py --port 18082 \
+  --evidence ../gretl-jenkins-spec/evidence/j3/browser
+```

@@ -1,0 +1,68 @@
+.gretl-console {
+  max-width: 75rem;
+  margin: 0 auto;
+}
+
+.gretl-catalog {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.gretl-card,
+.gretl-section {
+  border: 1px solid var(--jenkins-border-color, #b9c3d2);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+}
+
+.gretl-card h2,
+.gretl-heading h1,
+.gretl-heading h2 {
+  margin: 0;
+}
+
+.gretl-card-meta {
+  color: var(--text-color-secondary, inherit);
+  margin: 0.4rem 0;
+  font-size: 0.875rem;
+}
+
+.gretl-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.gretl-details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.4rem 1rem;
+}
+
+.gretl-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.gretl-section {
+  margin-top: 1.25rem;
+}
+
+.gretl-field {
+  max-width: 36rem;
+  margin: 1rem 0;
+}
+
+.gretl-field label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+}
+
+.gretl-table {
+  overflow-x: auto;
+}
