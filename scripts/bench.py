@@ -33,8 +33,10 @@ SCENARIOS = {
     'LEGACY': ('static', 'legacy', 'monorepo'),
     'IDLE': ('idle-test', 'shell', 'none'),
 }
+MATRIX = ('A1', 'A2', 'A3', 'B1', 'B2', 'B3', 'B4', 'C1', 'C2', 'C3', 'D1')
 METRICS = ('submit_ms', 'queue_ms', 'provision_s', 'containers_s',
-           'agent_ready_s', 'workspace_ms', 'pipeline_tail_ms', 'unattributed_ms', 'checkout_ms', 'first_action_ms', 'runtime_ms', 'total_ms')
+           'agent_ready_s', 'workspace_ms', 'setup_ms', 'pipeline_tail_ms',
+           'finish_ms', 'checkout_ms', 'first_action_ms', 'runtime_ms', 'total_ms')
 MARKER = re.compile(r'^BENCH ([\w-]+) (\d+)(?: (.*))?$')
 
 
@@ -116,13 +118,15 @@ def durations(row, details, markers):
     workspace = delta(at('workspace-end'), at('workspace-start'))
     tail = delta(at('pipeline-end'), at('runtime-end'))
     total = details.get('elapsed_ms')
-    before_runtime = delta(at('runtime-start'), details['sent'])
-    residual = total - before_runtime - runtime - tail if None not in (total, before_runtime, runtime, tail) else None
-    row.update(submit_ms=delta(accepted, details['sent']),
+    preparation = delta(at('runtime-start'), ready)
+    setup = preparation - (workspace or 0) - (checkout or 0) if preparation is not None else None
+    pipeline_elapsed = delta(at('pipeline-end'), details.get('sent'))
+    finish = total - pipeline_elapsed if None not in (total, pipeline_elapsed) else None
+    row.update(submit_ms=delta(accepted, details.get('sent')),
                queue_ms=delta(ready, accepted), provision_s=seconds(created, accepted),
                containers_s=seconds(started, created), agent_ready_s=seconds(ready, started),
                checkout_ms=checkout, workspace_ms=workspace, pipeline_tail_ms=tail,
-               unattributed_ms=residual,
+               setup_ms=setup, finish_ms=finish,
                first_action_ms=delta(at('first-action'), at('runtime-start')),
                runtime_ms=runtime,
                total_ms=details.get('elapsed_ms'), build=build.get('number'),
@@ -131,19 +135,35 @@ def durations(row, details, markers):
 
 def run(call, scenario, iteration, daemon):
     agent, runtime, checkout = SCENARIOS[scenario]
-    before = pods()
-    if scenario == 'B1':
-        for name, pod in before.items():
-            if name.startswith('gretl-reusable-'):
-                kube('delete', 'pod', name, '--wait=true', '--timeout=20s')
-        before = pods()
-    row = dict(scenario=scenario, iteration=iteration, agent=agent, runtime=runtime, arch=os.uname().machine,
-               checkout=checkout, daemon=daemon, status='ERROR')
-    details = {'sent': time.time_ns() // 1000000}
+    row = dict(scenario=scenario, iteration=iteration, agent=agent, runtime=runtime,
+               arch=os.uname().machine, checkout=checkout, daemon=daemon, status='ERROR')
+    details = {}
     markers = {}
-    observed = dict(before)
-    start = time.monotonic()
     try:
+        before = pods()
+        if scenario == 'B1':
+            for name, pod in before.items():
+                if name.startswith('gretl-reusable-') and pod['metadata']['labels'].get('jenkins') == 'slave':
+                    kube('delete', 'pod', name, '--wait=true', '--timeout=60s')
+            before = pods()
+        deadline = time.monotonic() + 90
+        while True:
+            computers = json.loads(call('/computer/api/json?tree=computer[displayName,idle,offline]')[0])['computer']
+            matching = [c for c in computers if c['displayName'].startswith('gretl-' + agent)]
+            if scenario == 'B1':
+                ready = not matching
+            elif scenario.startswith('A') or scenario == 'IDLE':
+                ready = not matching and not any(name.startswith('gretl-' + agent + '-') for name in pods())
+            else:
+                ready = any(c['idle'] and not c['offline'] for c in matching)
+            if ready:
+                break
+            if time.monotonic() >= deadline:
+                raise TimeoutError('agent precondition did not become ready')
+            time.sleep(1)
+        observed = dict(before)
+        details['sent'] = time.time_ns() // 1000000
+        start = time.monotonic()
         _, headers = call('/job/bench/buildWithParameters',
                           dict(AGENT=agent, RUNTIME=runtime, CHECKOUT=checkout,
                                DAEMON=str(daemon).lower()))
@@ -173,20 +193,30 @@ def run(call, scenario, iteration, daemon):
         pod_name = markers.get('pod', (None, ''))[1]
         details['pod'] = observed.get(pod_name)
         if details['pod']:
-            details['events'] = json.loads(kube(
-                'get', 'events', '--field-selector',
-                'involvedObject.uid=' + details['pod']['metadata']['uid'], '-o', 'json'
-            ))['items']
+            try:
+                details['events'] = json.loads(kube(
+                    'get', 'events', '--field-selector',
+                    'involvedObject.uid=' + details['pod']['metadata']['uid'], '-o', 'json'
+                ))['items']
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                details['event_error'] = str(error)
         previous = before.get(pod_name)
         if details['pod']:
             row['new_pod'] = not previous or previous['metadata']['uid'] != details['pod']['metadata']['uid']
         events = details.get('events', [])
-        row['image_cache'] = ('pull' if any(e['reason'] == 'Pulling' for e in events)
-                              else 'cached') if row.get('new_pod') else 'running'
+        if row.get('new_pod'):
+            if any(e['reason'] == 'Pulling' for e in events):
+                row['image_cache'] = 'pull'
+            else:
+                cached = sum(e['reason'] == 'Pulled' and 'already present' in e['message']
+                             for e in events)
+                row['image_cache'] = 'cached' if cached >= len(details['pod']['spec']['containers']) else 'unknown'
+        elif details['pod']:
+            row['image_cache'] = 'running'
         row['status'] = details['build']['result']
         if row['status'] == 'SUCCESS':
             expected_new = scenario.startswith('A') or scenario in ('B1', 'IDLE')
-            if not details['pod'] or 'first-action' not in markers or row['new_pod'] != expected_new:
+            if not details['pod'] or 'first-action' not in markers or row['new_pod'] != expected_new or (expected_new and row['image_cache'] != 'cached'):
                 row['status'] = 'INVALID'
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         details['error'] = str(error)
@@ -219,7 +249,7 @@ def main():
     parser.add_argument('--port', type=int, default=18080)
     parser.add_argument('--output', type=Path, default=ROOT.parent / 'gretl-jenkins-spec/measurements')
     args = parser.parse_args()
-    scenarios = args.scenarios or list(SCENARIOS)[:11]
+    scenarios = args.scenarios or MATRIX
     if args.iterations < 1 or any(s not in SCENARIOS for s in scenarios):
         parser.error('choose a positive iteration count and scenarios ' + ', '.join(SCENARIOS))
     if kube('config', 'current-context').strip() != 'k3d-' + LAB:
@@ -227,6 +257,14 @@ def main():
     output = args.output / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     output.mkdir(parents=True)
     call = connection(f'http://127.0.0.1:{args.port}')
+    metadata = {
+        'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
+        'dirty': bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip()),
+        'started': datetime.now().astimezone().isoformat(),
+        'scenarios': scenarios, 'iterations': args.iterations, 'daemon': args.daemon,
+        'architecture': os.uname().machine,
+    }
+    (output / 'manifest.json').write_text(json.dumps(metadata, indent=2) + '\n')
     rows = []
     fields = ('scenario', 'iteration', 'agent', 'runtime', 'checkout', 'daemon', 'build',
               'pod_uid', 'new_pod', 'revision', 'arch', 'image_cache', 'status', *METRICS)
@@ -242,6 +280,8 @@ def main():
                 writer.writerow(row)
                 file.flush()
                 print(scenario, iteration, row['status'], row['pod_uid'] if 'pod_uid' in row else '', flush=True)
+    metadata['finished'] = datetime.now().astimezone().isoformat()
+    (output / 'manifest.json').write_text(json.dumps(metadata, indent=2) + '\n')
     (output / 'summary.json').write_text(json.dumps(summary(rows), indent=2) + '\n')
     print(output)
     return int(any(row['status'] != 'SUCCESS' for row in rows))
