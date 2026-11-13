@@ -40,10 +40,10 @@ METRICS = ('submit_ms', 'queue_ms', 'provision_s', 'containers_s',
 MARKER = re.compile(r'^BENCH ([\w-]+) (\d+)(?: (.*))?$')
 
 
-def kube(*args):
+def kube(*args, timeout=20):
     cmd = ['kubectl', '--kubeconfig', str(ROOT / '.local/kubeconfig'),
            '--context', 'k3d-' + LAB, '-n', LAB, *args]
-    return subprocess.check_output(cmd, text=True, timeout=20)
+    return subprocess.check_output(cmd, text=True, timeout=timeout)
 
 
 def connection(url):
@@ -146,7 +146,7 @@ def run(call, scenario, iteration, daemon):
         if scenario == 'B1':
             for name, pod in before.items():
                 if name.startswith('gretl-reusable-') and pod['metadata']['labels'].get('jenkins') == 'slave':
-                    kube('delete', 'pod', name, '--wait=true', '--timeout=60s')
+                    kube('delete', 'pod', name, '--wait=true', '--timeout=60s', timeout=70)
             before = pods()
         deadline = time.monotonic() + 90
         while True:
