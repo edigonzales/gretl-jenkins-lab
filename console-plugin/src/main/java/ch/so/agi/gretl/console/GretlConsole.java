@@ -60,7 +60,7 @@ public final class GretlConsole implements RootAction {
     }
 
     private static boolean validId(String id) {
-        return id.length() <= 40 && ID.matcher(id).matches();
+        return id != null && id.length() <= 40 && ID.matcher(id).matches();
     }
 
     private static Optional<ConsoleJob> entry(WorkflowJob job) {

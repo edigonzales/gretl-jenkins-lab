@@ -106,10 +106,10 @@ public final class ConsoleJob {
     }
 
     private static Build build(WorkflowRun run) {
-        InputAction input = run.getAction(InputAction.class);
         Result result = run.getResult();
         boolean running = run.isBuilding();
-        boolean waiting = running && input != null && input.getIconFileName() != null;
+        boolean waiting = running && run.getActions(InputAction.class).stream()
+                .anyMatch(input -> input.getIconFileName() != null);
         String status = waiting ? "Wartet auf Freigabe" : running ? "Läuft" : resultLabel(result);
         boolean artifacts = (!Functions.isArtifactsPermissionEnabled() || run.hasPermission(Run.ARTIFACTS))
                 && !run.getArtifactsUpTo(1).isEmpty();
@@ -131,6 +131,7 @@ public final class ConsoleJob {
     }
 
     public Build getLatest() {
+        job.checkPermission(Item.READ);
         var run = job.getLastBuild();
         return run == null ? null : build(run);
     }
