@@ -183,7 +183,7 @@ def runJob(model, step, inputs, uploads, approvals, artifacts) {
                     int status
                     withEnv(["OUTPUT_FILE=${path}"]) {
                         status = sh(returnStatus: true, script: '''
-                            test -f "$OUTPUT_FILE" && test "$(realpath -- "$OUTPUT_FILE")" = "$PWD/$OUTPUT_FILE"
+                            test -f "$OUTPUT_FILE" && test "$(realpath -- "$OUTPUT_FILE")" = "$(pwd -P)/$OUTPUT_FILE"
                         ''')
                     }
                     if (status == 0) {

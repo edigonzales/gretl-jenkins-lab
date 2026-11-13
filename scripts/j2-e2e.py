@@ -6,7 +6,6 @@ import http.cookiejar
 import json
 from pathlib import Path
 import re
-import subprocess
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -43,15 +42,16 @@ class Jenkins:
             headers[crumb["crumbRequestField"]] = crumb["crumb"]
             data = urlencode(form).encode()
             if upload:
-                name, filename, content = upload
                 boundary = uuid4().hex
                 body = bytearray()
                 for field, value in form.items():
                     body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="{field}"\r\n\r\n{value}\r\n'.encode())
-                body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
-                            'Content-Type: application/octet-stream\r\n\r\n'.encode())
-                body.extend(content)
-                body.extend(f"\r\n--{boundary}--\r\n".encode())
+                for name, filename, content in upload:
+                    body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
+                                'Content-Type: application/octet-stream\r\n\r\n'.encode())
+                    body.extend(content)
+                    body.extend(b"\r\n")
+                body.extend(f"--{boundary}--\r\n".encode())
                 headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
                 data = body
         try:
@@ -70,8 +70,9 @@ class Jenkins:
         endpoint = "buildWithParameters" if parameterized else "build"
         fields = {"J2_" + key: value for key, value in (form or {}).items()}
         if upload:
-            upload = ("J2_" + upload[0], *upload[1:])
-        _, headers = self.call(f"/job/gretl-{name}/{endpoint}", fields, upload, expected=(201, 303))
+            upload = [("J2_" + name, filename, content) for name, filename, content in
+                      ([upload] if isinstance(upload, tuple) else upload)]
+        _, headers = self.call(f"/job/gretl-{name}/{endpoint}", fields, upload, expected=(201,))
         return urlsplit(headers["Location"]).path
 
 
@@ -104,7 +105,10 @@ def credentials():
 
 
 def finish(client, build, expected, evidence):
-    result = poll(lambda: client.json(build + "api/json").get("result"))
+    def completed():
+        record = client.json(build + "api/json")
+        return record.get("result") if not record["building"] else None
+    result = poll(completed)
     log = client.call(build + "consoleText")[0].decode()
     (evidence / (build.strip("/").replace("/", "-") + ".log")).write_text(log)
     assert result == expected, f"{build}: {result}, expected {expected}. See {evidence}"

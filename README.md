@@ -98,3 +98,14 @@ behalten ihren Platz bis zum Abschluss inklusive Freigabe. Stashes liegen im
 Jenkins-Home. Der Laufbericht des generischen Runtime-Image-Builders steht in
 `.local/j2-image/candidate.json`. Die Pipeline serialisiert validierte Werte
 als Strings, wie es die gepinnte GRETL-CLI für `--params-file` verlangt.
+
+Die ergänzende Abnahme prüft ungültige Kataloge, die Fehlerpfade der
+gemeinsamen Pipeline und einen Katalogwechsel während der Freigabe.
+Sie legt kurzzeitig synthetische Jenkins-Jobs an und stellt den
+ursprünglichen Katalog danach wieder her. Führe die Abnahmeskripte
+nacheinander auf dem dedizierten Labor aus.
+
+```sh
+.local/j2-venv/bin/python scripts/j2-acceptance.py --port 18082 \
+  --evidence ../gretl-jenkins-spec/evidence/acceptance-extra
+```
