@@ -30,7 +30,10 @@ def main():
             page.locator('[name=j_password]').fill(password[name])
             page.locator('button[type=submit]').click()
             page.wait_for_url(base + "/")
-        operator.goto(base + "/job/gretl-csv-publication/build?delay=0sec")
+        auth = e2e.Jenkins(args.port, "operator", password["operator"])
+        job = "/job/gretl-csv-publication/"
+        previous = (auth.json(job + "api/json?tree=lastBuild[number]").get("lastBuild") or {}).get("number", 0)
+        operator.goto(base + job + "build?delay=0sec")
         operator.locator('input[type=file]').set_input_files(fixture)
         operator.screenshot(path=args.evidence / "1-upload.png")
         with operator.expect_response(lambda response: response.request.method == "POST" and
@@ -40,24 +43,22 @@ def main():
         location = response.headers.get("location", "")
         if "/queue/item/" in location:
             from urllib.parse import urlsplit
-            auth = e2e.Jenkins(args.port, "operator", password["operator"])
             build = e2e.queued_build(auth, urlsplit(location).path)
         else:
-            # Classic build form redirects to the job page. Find the submitted run
-            # from the Build History link with the greatest visible build number.
-            operator.goto(base + "/job/gretl-csv-publication/")
-            link = operator.locator('a[href*="/job/gretl-csv-publication/"][href$="/console"]').first
-            link.wait_for()
-            build = link.get_attribute("href").rsplit("console", 1)[0]
+            def submitted():
+                last = auth.json(job + "api/json?tree=lastBuild[number]")["lastBuild"]
+                return last["number"] if last and last["number"] > previous else None
+            build = job + str(e2e.poll(submitted)) + "/"
         client = e2e.Jenkins(args.port, "reviewer", password["reviewer"])
         e2e.poll(lambda: b"Proceed" in client.call(build + "input/Review/", expected=(200, 404))[0])
         report = reviewer.request.get(base + build + "artifact/prepare/review.json")
         assert report.ok and report.json()["records"] == 3
         reviewer.goto(base + build + "input/")
-        reviewer.locator('input[name=value]').fill("Freigabe aus der Jenkins-Oberfläche")
+        reviewer.locator('div[name=parameter]:has(input[value=publicationNote]) input[name=value]').fill("Freigabe aus der Jenkins-Oberfläche")
         reviewer.screenshot(path=args.evidence / "2-approval.png")
         reviewer.get_by_role("button", name="Proceed", exact=True).click()
         e2e.finish(client, build, "SUCCESS", args.evidence)
+        assert client.json(build + "artifact/publish/publication.json")["note"] == "Freigabe aus der Jenkins-Oberfläche"
         reviewer.goto(base + build)
         with reviewer.expect_download() as download:
             reviewer.get_by_role("link", name="published.csv").click()

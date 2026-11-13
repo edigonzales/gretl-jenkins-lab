@@ -31,9 +31,9 @@ for user in ['operator', 'reviewer', 'viewer', 'outsider', 'dual-role']:
     jenkins['securityRealm']['local']['users'].append(
         {'id': user, 'password': '${jenkins-j2-users-' + user + '}'})
 templates = jenkins['clouds'][0]['kubernetes']['templates']
-agent = dict(templates[1], name='gretl-j2', label='gretl-j2')
+agent = dict(next(t for t in templates if t['name'] == 'gretl-reusable'), name='gretl-j2', label='gretl-j2')
 pod = yaml.safe_load(agent['yaml'])
-pod['spec']['containers'][1]['image'] = image
+next(c for c in pod['spec']['containers'] if c['name'] == 'gretl')['image'] = image
 agent['yaml'] = yaml.safe_dump(pod)
 templates.append(agent)
 yaml.safe_dump(config, sys.stdout, sort_keys=False)

@@ -81,7 +81,13 @@ def approve(model, step, requester) {
     if (!reviewer || (!policy.allowSelfApproval && (!requester || reviewer.equalsIgnoreCase(requester)))) {
         error('Approval requires a reviewer other than the authenticated requester')
     }
-    if (policy.commentRequired && !response.GRETL_APPROVAL_COMMENT?.trim()) error('Approval comment required')
+    if (policy.commentRequired) {
+        String comment = response.GRETL_APPROVAL_COMMENT
+        if (!comment?.trim() || comment.length() > 4096 || comment.contains('\u0000')) {
+            error('Approval requires a comment of at most 4096 characters')
+        }
+        echo "Approval comment: ${comment}"
+    }
     echo "Approval by ${reviewer}"
     return policy.fields.collectEntries { name, p -> [(name): scalar(p, response[name])] }
 }
@@ -132,12 +138,14 @@ def runJob(model, step, inputs, uploads, approvals, artifacts) {
                 if (p.required && value == null) error("Missing parameter ${name}")
                 if (value != null) values[name] = value
             }
-            if (writeJSON(returnText: true, json: values).getBytes('UTF-8').length > 131072) {
-                error('Total parameter size exceeds 128 KiB')
-            }
             def workspace = pwd()
             job.outputs.values().each { out -> values[out.parameter] = "${workspace}/outputs/${out.path}" }
-            writeJSON(file: 'parameters.json', json: values.collectEntries { name, value -> [(name): value.toString()] })
+            def parameterJson = writeJSON(returnText: true, json:
+                values.collectEntries { name, value -> [(name): value.toString()] })
+            if (parameterJson.getBytes('UTF-8').length > 131072) {
+                error('Total parameter size exceeds 128 KiB')
+            }
+            writeFile(file: 'parameters.json', text: parameterJson, encoding: 'UTF-8')
             writeJSON(file: 'runtime.json', json: [schemaVersion: 1, runtime: [
                 workRoot: "${workspace}/work", reportRoot: "${workspace}/reports"
             ], secrets: [:], taskConfig: [:]])
