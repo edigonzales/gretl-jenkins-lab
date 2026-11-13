@@ -69,6 +69,7 @@ def main():
     parser.add_argument("--port", type=int, default=18082)
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--previous-ref", default="c4bbba0d2da981aabd4d9401d2267540fef9e666")
+    parser.add_argument("--approval-only", action="store_true", help="Check approval without extra fields")
     args = parser.parse_args()
     evidence = args.evidence.resolve()
     evidence.mkdir(parents=True, exist_ok=True)
@@ -106,6 +107,31 @@ def main():
         if "Exception:" in body or "startup failed:" in body:
             raise RuntimeError(body)
         return body.strip()
+
+    if args.approval_only:
+        catalog = generator.read_catalog(repo, rev)
+        policy = dict(message="J2 acceptance", fields={}, allowSelfApproval=False, commentRequired=False)
+        name = "acceptance-approval"
+        flow = dict(id=name, name=name, description="Synthetic approval without additional fields",
+                    parameters={}, access={"approve": {"users": ["reviewer"]}},
+                    execution={"serial": True, "timeoutSeconds": 90},
+                    steps=[dict(id="review", approval=policy)])
+        script = yaml.safe_load(original)
+        script["jobs"][0]["script"] += "\n" + generator.render(flow, catalog, url, rev, image, pipeline)
+        path = "/job/gretl-acceptance-approval/"
+        try:
+            apply(yaml.safe_dump(script))
+            e2e.poll(lambda: "gretl-acceptance-approval" in
+                     {j["name"] for j in admin.json("/api/json?tree=jobs[name]")["jobs"]})
+            _, headers = admin.call(path + "build", {}, expected=(201,))
+            build = e2e.queued_build(admin, "/queue/item/" + headers["Location"].rstrip("/").rsplit("/", 1)[1] + "/")
+            e2e.poll(lambda: b"Proceed" in reviewer.call(build + "input/Review/", expected=(200, 404))[0])
+            reviewer.call(build + "input/Review/proceedEmpty", {}, expected=(200, 302, 303))
+            require("Approval by reviewer" in e2e.finish(admin, build, "SUCCESS", evidence), "Missing reviewer identity")
+        finally:
+            apply(original)
+            admin.call(path + "doDelete", {}, expected=(302, 303, 404))
+        return
 
     names = {j["name"] for j in admin.json("/api/json?tree=jobs[name]")["jobs"]}
     require({"gretl-hello-gretl", "gretl-csv-publication"} <= names, "Public definitions missing")

@@ -3,7 +3,7 @@ def model = readJSON(text: '@MODEL@', returnPojo: true)
 
 def scalar(p, value) {
     if (value == null || (value == '' && !(p.type in ['text', 'multiline', 'enum']))) {
-        if (p.containsKey('default')) return scalar(p, p.default)
+        if (p.default != null) return scalar(p, p.default)
         if (!p.required) return null
         error("Missing parameter ${p.name}")
     }
@@ -77,8 +77,8 @@ def approve(model, step, requester, scheduled) {
     if (policy.commentRequired) fields.add(text(name: 'GRETL_APPROVAL_COMMENT', description: 'Kommentar'))
     def response = input(id: step.id, message: policy.message, submitter: model.submitters,
                          submitterParameter: 'GRETL_APPROVER', parameters: fields)
-    def reviewer = fields ? response.GRETL_APPROVER : response
-    if (!reviewer || (!policy.allowSelfApproval && (requester ? reviewer.equalsIgnoreCase(requester) : !scheduled))) {
+    def reviewer = response instanceof Map ? response.GRETL_APPROVER : response
+    if (!(reviewer instanceof String) || !reviewer || (!policy.allowSelfApproval && (requester ? reviewer.equalsIgnoreCase(requester) : !scheduled))) {
         error('Approval requires a reviewer other than the authenticated requester')
     }
     if (policy.commentRequired) {
@@ -106,6 +106,7 @@ def materialize(name, binding, inputs, uploads, approvals, artifacts) {
         String extension = uploads[binding.fromInput]
         if (!extension) return null
         dir('inputs') {
+            // The File Parameter plugin stashes each stashedFile before the pipeline starts.
             dir(name) { unstash("J2_${binding.fromInput}") }
             withEnv(["UPLOAD_SOURCE=${name}/J2_${binding.fromInput}", "UPLOAD_TARGET=${name}${extension}"]) {
                 sh 'mv -- "$UPLOAD_SOURCE" "$UPLOAD_TARGET"'
