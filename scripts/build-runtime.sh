@@ -28,4 +28,6 @@ git -C ../gretl-runtime archive "$runtime" | docker run --rm -i -e "SOURCE_REVIS
   '
 docker run --rm -v "$volume:/build:ro" "$java" tar -C /build/gretl-dist/target/dist -cf - . |
   tar -xf - -C .local/dist
+chmod -R a+rX .local/dist
+chmod a+x .local/dist/bin/gretl
 printf '%s\n' "$runtime" > .local/runtime-revision

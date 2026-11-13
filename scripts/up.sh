@@ -11,8 +11,9 @@ else
     --tty=false --mount-none template:docker-rootful
 fi
 docker info >/dev/null
-if [[ $(k3d cluster list "$lab" --no-headers 2>/dev/null) == "$lab"* ]]; then
-  k3d cluster start "$lab"
+cluster=$(k3d cluster list "$lab" --no-headers 2>/dev/null | awk -v name="$lab" '$1==name {print $2}' || true)
+if [[ -n $cluster ]]; then
+  if [[ $cluster != 1/1 ]]; then k3d cluster start "$lab"; fi
 else
   k3d cluster create --config k3d/cluster.yaml
 fi
@@ -23,10 +24,11 @@ kube create namespace "$namespace" --dry-run=client -o yaml | kube apply -f -
 kube label namespace "$namespace" app.kubernetes.io/part-of="$lab" --overwrite
 ./scripts/install-jenkins.sh
 
+docker exec "k3d-$lab-server-0" crictl pull jenkins/inbound-agent:3395.v6e5377b_0fb_3c-4-jdk25
 image=gretl-lab-tools:local
 ./scripts/build-runtime.sh
 target=with-runtime
-docker build --target "$target" -f images/tools.Dockerfile -t "$image" .
+docker build --provenance=false --target "$target" -f images/tools.Dockerfile -t "$image" .
 image_id=$(docker image inspect -f '{{.Id}}' "$image")
 image_changed=false
 if [[ $(cat .local/agent-image-id 2>/dev/null || true) != "$image_id" ]] ||

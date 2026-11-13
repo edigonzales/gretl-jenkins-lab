@@ -51,7 +51,7 @@ def runFixture() {
             (
                 while IFS= read -r line; do
                     case "$line" in
-                        BENCH_FIRST_ACTION|"Hallo Welt") mark first-action ;;
+                        BENCH_FIRST_ACTION|*"Script message [gretl.script.message]: BENCH_FIRST_ACTION "*|"Hallo Welt") mark first-action ;;
                     esac
                     printf '%s\\n' "$line"
                 done < bench-output
@@ -71,7 +71,9 @@ timestamps {
     node("gretl-${params.AGENT}") {
         mark('agent-ready', env.NODE_NAME)
         try {
+            mark('workspace-start')
             deleteDir()
+            mark('workspace-end')
             if (params.AGENT == 'static') {
                 runFixture()
             } else {
@@ -79,6 +81,7 @@ timestamps {
             }
         } finally {
             deleteDir()
+            mark('pipeline-end')
         }
     }
 }

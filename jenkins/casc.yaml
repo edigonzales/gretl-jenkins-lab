@@ -46,6 +46,7 @@ jenkins:
                 containers:
                   - name: jnlp
                     image: jenkins/inbound-agent:3395.v6e5377b_0fb_3c-4-jdk25
+                    imagePullPolicy: IfNotPresent
                     resources:
                       requests: {cpu: 200m, memory: 256Mi}
                       limits: {cpu: "1", memory: 512Mi}

@@ -33,8 +33,8 @@ SCENARIOS = {
     'LEGACY': ('static', 'legacy', 'monorepo'),
     'IDLE': ('idle-test', 'shell', 'none'),
 }
-METRICS = ('submit_ms', 'queue_ms', 'pod_create_ms', 'containers_ms',
-           'agent_ready_ms', 'checkout_ms', 'first_action_ms', 'runtime_ms', 'total_ms')
+METRICS = ('submit_ms', 'queue_ms', 'provision_s', 'containers_s',
+           'agent_ready_s', 'workspace_ms', 'pipeline_tail_ms', 'unattributed_ms', 'checkout_ms', 'first_action_ms', 'runtime_ms', 'total_ms')
 MARKER = re.compile(r'^BENCH ([\w-]+) (\d+)(?: (.*))?$')
 
 
@@ -94,7 +94,7 @@ def durations(row, details, markers):
 
     build = details.get('build', {})
     queue = details.get('queue', {})
-    pod = details.get('pod', {})
+    pod = details.get('pod') or {}
     accepted = queue.get('inQueueSince')
     ready = at('agent-ready')
     created = started = None
@@ -107,12 +107,24 @@ def durations(row, details, markers):
                       if 'running' in c.get('state', {})]
             if len(starts) == len(pod['spec']['containers']):
                 started = max(starts)
+    def seconds(end, start):
+        elapsed = delta(end, start)
+        return round(elapsed / 1000) if elapsed is not None else None
+
+    checkout = delta(at('checkout-end'), at('checkout-start'))
+    runtime = delta(at('runtime-end'), at('runtime-start'))
+    workspace = delta(at('workspace-end'), at('workspace-start'))
+    tail = delta(at('pipeline-end'), at('runtime-end'))
+    total = details.get('elapsed_ms')
+    before_runtime = delta(at('runtime-start'), details['sent'])
+    residual = total - before_runtime - runtime - tail if None not in (total, before_runtime, runtime, tail) else None
     row.update(submit_ms=delta(accepted, details['sent']),
-               queue_ms=delta(ready, accepted), pod_create_ms=delta(created, accepted),
-               containers_ms=delta(started, created), agent_ready_ms=delta(ready, started),
-               checkout_ms=delta(at('checkout-end'), at('checkout-start')),
+               queue_ms=delta(ready, accepted), provision_s=seconds(created, accepted),
+               containers_s=seconds(started, created), agent_ready_s=seconds(ready, started),
+               checkout_ms=checkout, workspace_ms=workspace, pipeline_tail_ms=tail,
+               unattributed_ms=residual,
                first_action_ms=delta(at('first-action'), at('runtime-start')),
-               runtime_ms=delta(at('runtime-end'), at('runtime-start')),
+               runtime_ms=runtime,
                total_ms=details.get('elapsed_ms'), build=build.get('number'),
                revision=markers.get('revision', (None, ''))[1])
 
@@ -125,7 +137,7 @@ def run(call, scenario, iteration, daemon):
             if name.startswith('gretl-reusable-'):
                 kube('delete', 'pod', name, '--wait=true', '--timeout=20s')
         before = pods()
-    row = dict(scenario=scenario, iteration=iteration, agent=agent, runtime=runtime,
+    row = dict(scenario=scenario, iteration=iteration, agent=agent, runtime=runtime, arch=os.uname().machine,
                checkout=checkout, daemon=daemon, status='ERROR')
     details = {'sent': time.time_ns() // 1000000}
     markers = {}
@@ -157,7 +169,7 @@ def run(call, scenario, iteration, daemon):
             match = MARKER.search(re.sub(r'^\S+\s+(?=BENCH )', '', line))
             if match:
                 name, stamp, value = match.groups()
-                markers[name] = int(stamp), value or ''
+                markers.setdefault(name, (int(stamp), value or ''))
         pod_name = markers.get('pod', (None, ''))[1]
         details['pod'] = observed.get(pod_name)
         if details['pod']:
@@ -168,6 +180,9 @@ def run(call, scenario, iteration, daemon):
         previous = before.get(pod_name)
         if details['pod']:
             row['new_pod'] = not previous or previous['metadata']['uid'] != details['pod']['metadata']['uid']
+        events = details.get('events', [])
+        row['image_cache'] = ('pull' if any(e['reason'] == 'Pulling' for e in events)
+                              else 'cached') if row.get('new_pod') else 'running'
         row['status'] = details['build']['result']
         if row['status'] == 'SUCCESS':
             expected_new = scenario.startswith('A') or scenario in ('B1', 'IDLE')
@@ -214,10 +229,11 @@ def main():
     call = connection(f'http://127.0.0.1:{args.port}')
     rows = []
     fields = ('scenario', 'iteration', 'agent', 'runtime', 'checkout', 'daemon', 'build',
-              'pod_uid', 'new_pod', 'revision', 'status', *METRICS)
+              'pod_uid', 'new_pod', 'revision', 'arch', 'image_cache', 'status', *METRICS)
     with (output / 'runs.csv').open('w', newline='') as file:
         writer = csv.DictWriter(file, fieldnames=fields)
         writer.writeheader()
+        file.flush()
         for scenario in scenarios:
             for iteration in range(1, args.iterations + 1):
                 row, details = run(call, scenario, iteration, args.daemon)
