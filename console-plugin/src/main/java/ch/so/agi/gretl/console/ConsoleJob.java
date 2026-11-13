@@ -1,12 +1,16 @@
 package ch.so.agi.gretl.console;
 
 import hudson.Functions;
+import hudson.model.BooleanParameterDefinition;
+import hudson.model.ChoiceParameterDefinition;
 import hudson.model.Item;
 import hudson.model.ParameterDefinition;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.model.Result;
 import hudson.model.Run;
+import hudson.model.StringParameterDefinition;
 import hudson.model.StringParameterValue;
+import hudson.model.TextParameterDefinition;
 import java.util.ArrayList;
 import java.util.List;
 import net.sf.json.JSONArray;
@@ -152,7 +156,17 @@ public final class ConsoleJob {
         }
 
         public String getType() {
-            return metadata.optString("type");
+            String type = metadata.optString("type");
+            boolean compatible = switch (type) {
+                case "date", "integer", "text" -> definition.getClass() == StringParameterDefinition.class;
+                case "multiline" -> definition.getClass() == TextParameterDefinition.class;
+                case "boolean" -> definition.getClass() == BooleanParameterDefinition.class;
+                case "enum" -> definition.getClass() == ChoiceParameterDefinition.class;
+                case "file" -> definition.getClass().getName()
+                        .equals("io.jenkins.plugins.file_parameters.StashedFileParameterDefinition");
+                default -> false;
+            };
+            return compatible ? type : "";
         }
 
         public String getLabel() {
@@ -165,7 +179,7 @@ public final class ConsoleJob {
         }
 
         public List<Choice> getChoices() {
-            if (!(definition instanceof hudson.model.ChoiceParameterDefinition choice)) {
+            if (!(definition instanceof ChoiceParameterDefinition choice)) {
                 return List.of();
             }
             JSONArray options = metadata.optJSONArray("options");

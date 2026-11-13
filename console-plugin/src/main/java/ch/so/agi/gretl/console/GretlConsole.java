@@ -42,7 +42,6 @@ public final class GretlConsole implements RootAction {
         Jenkins jenkins = Jenkins.get();
         jenkins.checkPermission(Jenkins.READ);
         return jenkins.getItems(WorkflowJob.class).stream()
-                .filter(job -> !job.isDisabled())
                 .map(GretlConsole::entry)
                 .flatMap(Optional::stream)
                 .sorted(Comparator.comparing(ConsoleJob::getTitle))
@@ -53,15 +52,19 @@ public final class GretlConsole implements RootAction {
     public ConsoleJob getDynamic(String id) {
         Jenkins jenkins = Jenkins.get();
         jenkins.checkPermission(Jenkins.READ);
-        if (id.length() > 40 || !ID.matcher(id).matches()) {
+        if (!validId(id)) {
             return null;
         }
         Item item = jenkins.getItem("gretl-" + id);
         return item instanceof WorkflowJob job ? entry(job).orElse(null) : null;
     }
 
+    private static boolean validId(String id) {
+        return id.length() <= 40 && ID.matcher(id).matches();
+    }
+
     private static Optional<ConsoleJob> entry(WorkflowJob job) {
-        if (!job.hasPermission(Item.READ) || !(job.getDefinition() instanceof CpsFlowDefinition definition)) {
+        if (job.isDisabled() || !job.hasPermission(Item.READ) || !(job.getDefinition() instanceof CpsFlowDefinition definition)) {
             return Optional.empty();
         }
         String script = definition.getScript();
@@ -70,13 +73,14 @@ public final class GretlConsole implements RootAction {
             return Optional.empty();
         }
         try {
-            String json = new String(Base64.getDecoder().decode(script.substring(MARKER.length(), newline)),
+            String json = new String(Base64.getDecoder().decode(script.substring(MARKER.length(), newline).strip()),
                     StandardCharsets.UTF_8);
             JSONObject metadata = JSONObject.fromObject(json);
-            if (metadata.optInt("schemaVersion") == 2
-                    && job.getName().equals("gretl-" + metadata.getString("id"))
-                    && metadata.getString("revision").matches("[a-f0-9]{40}")
-                    && REPOSITORY.matcher(metadata.getString("url")).matches()) {
+            String id = metadata.optString("id", "");
+            if (metadata.optInt("schemaVersion") == 2 && validId(id)
+                    && job.getName().equals("gretl-" + id)
+                    && metadata.optString("revision", "").matches("[a-f0-9]{40}")
+                    && REPOSITORY.matcher(metadata.optString("url", "")).matches()) {
                 return Optional.of(new ConsoleJob(job, metadata));
             }
         } catch (IllegalArgumentException | JSONException ignored) {
