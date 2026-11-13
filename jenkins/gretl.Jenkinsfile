@@ -71,14 +71,14 @@ def approvalFields(fields) {
     }
 }
 
-def approve(model, step, requester) {
+def approve(model, step, requester, scheduled) {
     def policy = step.approval
     def fields = approvalFields(policy.fields)
     if (policy.commentRequired) fields.add(text(name: 'GRETL_APPROVAL_COMMENT', description: 'Kommentar'))
     def response = input(id: step.id, message: policy.message, submitter: model.submitters,
                          submitterParameter: 'GRETL_APPROVER', parameters: fields)
     def reviewer = fields ? response.GRETL_APPROVER : response
-    if (!reviewer || (!policy.allowSelfApproval && (!requester || reviewer.equalsIgnoreCase(requester)))) {
+    if (!reviewer || (!policy.allowSelfApproval && (requester ? reviewer.equalsIgnoreCase(requester) : !scheduled))) {
         error('Approval requires a reviewer other than the authenticated requester')
     }
     if (policy.commentRequired) {
@@ -214,6 +214,7 @@ timestamps {
     currentBuild.description = "${model.id} @ ${model.revision.take(12)}"
     echo "GRETL ${model.id} build ${env.BUILD_NUMBER} source ${model.url}@${model.revision} runtime ${model.runtime}"
     def requester = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause').find { it.userId }?.userId
+    boolean scheduled = !currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').isEmpty()
     def unexpected = params.keySet() - model.parameters.keySet().collect { "J2_${it}".toString() }
     if (unexpected) error("Unexpected parameters: ${unexpected}")
     def filenames = [:]
@@ -235,7 +236,7 @@ timestamps {
             def artifacts = [:]
             model.steps.each { step ->
                 stage(step.id) {
-                    if (step.approval) approvals[step.id] = approve(model, step, requester)
+                    if (step.approval) approvals[step.id] = approve(model, step, requester, scheduled)
                     else artifacts[step.id] = runJob(model, step, inputs, uploads, approvals, artifacts)
                 }
             }
