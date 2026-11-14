@@ -55,8 +55,12 @@ def main():
     cleanup = "        } finally {\n            deleteDir()\n        }\n    }\n    return produced"
     assert script.count(cleanup) == 1
     inspection = (e2e.ROOT / "fixtures/timeout-tree-inspect.sh").read_text()
+    if args.standalone:
+        inspection = inspection.replace("set -eu\n", "set -eu\nWAIT_FOR_REAP=1\n", 1)
     script = script.replace(cleanup, cleanup.replace(
-        "            deleteDir()", "            sh " + generator.literal(inspection) + "\n            deleteDir()"
+        "            deleteDir()",
+        "            try {\n                sh " + generator.literal(inspection)
+        + "\n            } finally {\n                deleteDir()\n            }"
     ))
     xml = Element("flow-definition")
     definition = SubElement(xml, "definition", {"class": "org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition"})
@@ -87,17 +91,23 @@ def main():
         allowed_states = {"gone"} if args.standalone else {"gone", "Z"}
         assert all(process[4] in allowed_states for process in topology.values()), topology
         assert f"TIMEOUT_GROUP_STOPPED {gretl[2]}" in log and "TIMEOUT_GROUP_SURVIVOR" not in log
-        assert "GRETL JVM received TERM" in log and "(exit 137)" in log
+        assert "(exit 137)" in log
         start = re.search(r"\[([^\]]+)\] \+ exec timeout --kill-after=5s 15 ", log).group(1)
+        signal = re.search(r"GRETL JVM received TERM (\S+)", log).group(1)
         observed = re.search(r"\[([^\]]+)\] TIMEOUT_TREE gretl ", log).group(1)
-        elapsed = (datetime.fromisoformat(observed.replace("Z", "+00:00"))
-                   - datetime.fromisoformat(start.replace("Z", "+00:00"))).total_seconds()
+        started_at, signaled_at, observed_at = (datetime.fromisoformat(t.replace("Z", "+00:00"))
+                                                for t in (start, signal, observed))
+        term_elapsed = (signaled_at - started_at).total_seconds()
+        elapsed = (observed_at - started_at).total_seconds()
+        assert 14 <= term_elapsed < 19, term_elapsed
         assert 19 <= elapsed < 30, elapsed
         if not args.standalone:
             agent = re.search(r"Running on (\S+) in ", log).group(1)
             e2e.poll(lambda: f"pod/{agent}" not in e2e.kube("get", "pods", "-o", "name").splitlines(),
                      seconds=150)
-        print(f"TERM escalated to KILL. GRETL JVM, child and grandchild stopped on the same agent in {elapsed:.1f}s.",
+            print(f"Agent pod {agent} removed.", flush=True)
+        print(f"{build} TERM after {term_elapsed:.1f}s, escalated to KILL. "
+              f"GRETL JVM, child and grandchild stopped on the same agent in {elapsed:.1f}s.",
               flush=True)
     finally:
         admin.call(f"/job/{name}/doDelete", {}, expected=(302, 303, 404))

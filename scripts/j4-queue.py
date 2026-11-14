@@ -43,7 +43,9 @@ def main():
         result = git("ls-remote", REMOTE, ref)
         return result.split()[0] if result else None
 
-    publication = (args.jobs / "testdata/publication.csv").read_bytes()
+    publication = subprocess.check_output(
+        ["git", "-C", str(args.jobs), "show", f"{old}:testdata/publication.csv"]
+    )
 
     def enqueue(filename):
         _, headers = admin.call(job + "buildWithParameters", {"GRETL_DEV_BRANCH": branch, "GRETL_DEV_SHA": old},
@@ -54,12 +56,21 @@ def main():
         item = admin.json(queue + "api/json")
         assert not item.get("cancelled") and not item.get("executable"), item
         reason = item.get("why") or ""
-        return reason if item["blocked"] and f"Build #{build.strip('/').split('/')[-1]}" in reason else None
+        return item if item["blocked"] and f"Build #{build.strip('/').split('/')[-1]}" in reason else None
 
     def checkouts(log):
         return re.findall(r"GRETL checkout-end (\d+) ([a-f0-9]{40})", log)
 
-    first = second = None
+    def is_waiting(queue):
+        try:
+            item = admin.json(queue + "api/json")
+        except e2e.JenkinsError as error:
+            if error.status == 404:
+                return False
+            raise
+        return not (item.get("cancelled") or item.get("executable"))
+
+    first = second = blocker = rejected = None
     assert head() is None
     try:
         git("push", "--force-with-lease=" + ref + ":", REMOTE, old + ":" + ref)
@@ -67,6 +78,7 @@ def main():
         first = enqueue("queue-blocker.csv")
         blocker = e2e.queued_build(admin, first)
         e2e.poll(lambda: b"Proceed" in reviewer.call(blocker + "input/Review/", expected=(200, 404))[0])
+        assert f"source {REMOTE}@{old} runtime " in admin.call(blocker + "consoleText")[0].decode()
         second = enqueue("queued-branch.csv")
         before = e2e.poll(lambda: blocked_by(second, blocker))
         git("push", f"--force-with-lease={ref}:{old}", REMOTE, new + ":" + ref)
@@ -76,9 +88,9 @@ def main():
         assert b"Proceed" in reviewer.call(blocker + "input/Review/")[0]
         before_approval = checkouts(admin.call(blocker + "consoleText")[0].decode())
         assert [sha for _, sha in before_approval] == [old], before_approval
-        record = {"branch": branch, "oldHead": old, "newHead": new, "blocker": blocker,
+        record = {"remote": REMOTE, "branch": branch, "oldHead": old, "newHead": new, "blocker": blocker,
                   "queueItem": second, "blockedBeforePush": before, "blockedAfterPush": after,
-                  "checkoutsBeforeApproval": before_approval}
+                  "headAtSnapshot": new, "checkoutsBeforeApproval": before_approval}
         (args.evidence / "queue-transition.json").write_text(json.dumps(record, indent=2) + "\n")
 
         review = {"json": json.dumps({"parameter": [{"name": "publicationNote", "value": "J4 queue test"}]}),
@@ -107,21 +119,29 @@ def main():
         print(f"{branch} moved {old} -> {new} while {second} was blocked. {rejected} rejected before GRETL.")
     finally:
         try:
+            queue_ids = set()
             for queue in (second, first):
                 if queue is None:
                     continue
-                body, headers = admin.call(queue + "api/json", expected=(200, 404))
-                if not headers.get("Content-Type", "").startswith("application/json"):
-                    continue
-                item = json.loads(body)
-                executable = item.get("executable")
-                if executable:
-                    build = e2e.urlsplit(executable["url"]).path
-                    if admin.json(build + "api/json")["building"]:
-                        admin.call(build + "stop", {}, expected=(200, 302, 303))
-                elif not item.get("cancelled"):
-                    admin.call("/queue/cancelItem?id=" + queue.strip("/").split("/")[-1], {},
-                               expected=(200, 204, 302, 303, 404))
+                queue_id = int(queue.strip("/").split("/")[-1])
+                queue_ids.add(queue_id)
+                if is_waiting(queue):
+                    try:
+                        admin.call(f"/queue/cancelItem?id={queue_id}", {}, expected=(200, 204, 302, 303))
+                    except e2e.JenkinsError as error:
+                        if error.status not in (404, 500) or is_waiting(queue):
+                            raise
+            # Started builds outlive their queue entries. Include already known paths
+            # and resolve any handoff that took place before cancellation.
+            builds = {build for build in (blocker, rejected) if build}
+            if queue_ids:
+                builds.update(e2e.urlsplit(run["url"]).path for run in admin.json(
+                    job + "api/json?tree=builds[queueId,url]"
+                )["builds"] if run["queueId"] in queue_ids)
+            for build in builds:
+                if admin.json(build + "api/json")["building"]:
+                    admin.call(build + "stop", {}, expected=(200, 302, 303))
+                    e2e.poll(lambda: not admin.json(build + "api/json")["building"], seconds=60)
         finally:
             current = head()
             if current is not None:
