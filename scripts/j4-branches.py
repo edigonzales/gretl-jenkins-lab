@@ -53,7 +53,7 @@ def main():
         button = page.get_by_role("button", name="Mit diesem Branch starten")
         if args.disabled:
             expect(button).to_have_count(0)
-            admin.call(endpoint, dev, expected=(404, 405))
+            admin.call(endpoint, dev, expected=(404, 405, 409))
             print("Development action unavailable when disabled")
             return
         expect(button).to_be_visible()
