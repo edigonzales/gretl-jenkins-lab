@@ -1,0 +1,22 @@
+name: GRETL Console
+
+on:
+  push:
+    paths: ['console-plugin/**', '.github/workflows/console.yml']
+  pull_request:
+    paths: ['console-plugin/**', '.github/workflows/console.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - run: mvn -B -ntp -f console-plugin/pom.xml verify
