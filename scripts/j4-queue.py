@@ -17,7 +17,7 @@ REMOTE = "https://github.com/edigonzales/gretl-runtime-jobs.git"
 
 def settle_build(admin, job, queue, build=None):
     # A known build comes from this queue item's executable, after promotion.
-    if queue is None and build is None:
+    if not queue and build is None:
         return
     queue_id = int(queue.strip("/").split("/")[-1]) if queue else None
 
@@ -62,7 +62,7 @@ def settle_build(admin, job, queue, build=None):
         if build is None:
             (build,) = e2e.poll(find_build_or_cancel, seconds=60)
         if build is not None and e2e.poll(build_state, seconds=60)["building"]:
-            admin.call(build + "stop", {}, expected=(200, 302, 303))
+            admin.call(build + "stop", {}, expected=(200, 302, 303, 404))
             e2e.poll(lambda: (state := build_state()) and not state["building"], seconds=60)
     except TimeoutError as error:
         raise TimeoutError(f"Could not settle J4 queue item {queue_id}, build {build}") from error

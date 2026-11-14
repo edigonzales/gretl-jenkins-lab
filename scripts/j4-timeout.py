@@ -95,13 +95,16 @@ def main():
         assert f"TIMEOUT_GROUP_STOPPED {gretl[2]}" in log and "TIMEOUT_GROUP_SURVIVOR" not in log
         assert "(exit 137)" in log
         assert '+ exec timeout --kill-after=5s 15 ' in log
-        started_at, signaled_at, observed_at = (float(sample) for sample in re.findall(
-            r"(?:TIMEOUT_START|GRETL JVM received TERM|TIMEOUT_OBSERVED) ([0-9]+\.[0-9]+)$", log, re.M
-        ))
+        samples = []
+        for marker in ("TIMEOUT_START", "GRETL JVM received TERM", "TIMEOUT_OBSERVED"):
+            values = re.findall(rf"{marker} ([0-9]+\.[0-9]+)\r?$", log, re.M)
+            assert len(values) == 1, f"Expected one {marker} marker, found {values}. See {args.evidence}"
+            samples.append(float(values[0]))
+        started_at, signaled_at, observed_at = samples
         term_elapsed = signaled_at - started_at
         elapsed = observed_at - started_at
-        # Allow /proc/uptime's centisecond resolution. The second limit covers
-        # the entire observation, including agent-side process inspection.
+        # The command allows 15s before TERM plus 5s before KILL. Allow for
+        # uptime's centisecond resolution. The upper bound includes inspection.
         assert 14.98 <= term_elapsed < 19, term_elapsed
         assert 19.98 <= elapsed < 30, elapsed
         if not args.standalone:

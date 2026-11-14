@@ -2,6 +2,7 @@
 """Regression tests for cleanup during a Jenkins queue handoff."""
 import importlib.util
 import unittest
+from itertools import count
 from pathlib import Path
 from unittest.mock import Mock, call, patch
 
@@ -36,7 +37,7 @@ class QueueHandoffTest(unittest.TestCase):
                 queue_test.settle_build(admin, JOB, QUEUE)
                 self.assertEqual(admin.call.call_args_list, [
                     call(CANCEL, {}, expected=(204,)),
-                    call(BUILD + "stop", {}, expected=(200, 302, 303)),
+                    call(BUILD + "stop", {}, expected=(200, 302, 303, 404)),
                 ])
                 self.assertEqual(admin.json.call_args_list, [
                     call(QUEUE + "api/json"), call(BUILDS_API),
@@ -56,7 +57,7 @@ class QueueHandoffTest(unittest.TestCase):
         admin.json.side_effect = [
             {"blocked": True},
             queue_test.e2e.JenkinsError(BUILDS_API, 404, (200,)),
-            queue_test.e2e.JenkinsError(QUEUE, 404, (200,)),
+            {"blocked": True},
             {"builds": [{"queueId": 42, "url": BUILD}]},
             {"building": True},
             {"building": False},
@@ -65,7 +66,7 @@ class QueueHandoffTest(unittest.TestCase):
             queue_test.settle_build(admin, JOB, QUEUE)
         self.assertEqual(admin.call.call_args_list, [
             call(CANCEL, {}, expected=(204,)),
-            call(BUILD + "stop", {}, expected=(200, 302, 303)),
+            call(BUILD + "stop", {}, expected=(200, 302, 303, 404)),
         ])
 
     def test_executable_takes_precedence_when_queue_reports_cancelled(self):
@@ -76,14 +77,31 @@ class QueueHandoffTest(unittest.TestCase):
             {"building": False},
         ]
         queue_test.settle_build(admin, JOB, QUEUE)
-        admin.call.assert_called_once_with(BUILD + "stop", {}, expected=(200, 302, 303))
+        admin.call.assert_called_once_with(BUILD + "stop", {}, expected=(200, 302, 303, 404))
+
+    def test_cancelled_queue_item_checks_history_without_posting(self):
+        admin = Mock()
+        admin.json.side_effect = [{"cancelled": True}, {"builds": []}]
+        queue_test.settle_build(admin, JOB, QUEUE)
+        self.assertEqual(admin.json.call_args_list, [call(QUEUE + "api/json"), call(BUILDS_API)])
+        admin.call.assert_not_called()
 
     def test_stops_known_build_without_queue_path(self):
         admin = Mock()
         admin.json.side_effect = [{"building": True}, {"building": False}]
-        queue_test.settle_build(admin, JOB, None, BUILD)
+        with patch.object(queue_test.e2e.time, "sleep"):
+            queue_test.settle_build(admin, JOB, None, BUILD)
         self.assertEqual(admin.json.call_args_list, [call(BUILD_API), call(BUILD_API)])
-        admin.call.assert_called_once_with(BUILD + "stop", {}, expected=(200, 302, 303))
+        admin.call.assert_called_once_with(BUILD + "stop", {}, expected=(200, 302, 303, 404))
+
+    def test_stop_404_still_waits_for_terminal_state(self):
+        admin = Mock()
+        admin.call.return_value = (b"", {})
+        admin.json.side_effect = [{"building": True}, {"building": True}, {"building": False}]
+        with patch.object(queue_test.e2e.time, "sleep"):
+            queue_test.settle_build(admin, JOB, QUEUE, BUILD)
+        self.assertEqual(admin.json.call_args_list, [call(BUILD_API)] * 3)
+        admin.call.assert_called_once_with(BUILD + "stop", {}, expected=(200, 302, 303, 404))
 
     def test_missing_queue_and_build_expires_with_diagnostic(self):
         admin = Mock()
@@ -92,7 +110,7 @@ class QueueHandoffTest(unittest.TestCase):
             {"builds": []},
         ]
         with patch.object(queue_test.e2e.time, "sleep"), patch.object(
-            queue_test.e2e.time, "monotonic", side_effect=[0, 1, 61]
+            queue_test.e2e.time, "monotonic", side_effect=count(0, 31)
         ), self.assertRaisesRegex(TimeoutError, "Could not settle J4 queue item 42"):
             queue_test.settle_build(admin, JOB, QUEUE)
 
