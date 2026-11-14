@@ -120,7 +120,7 @@ def materialize(name, binding, inputs, uploads, approvals, artifacts) {
 def runJob(model, step, inputs, uploads, approvals, artifacts) {
     def job = model.jobs[step.job]
     def produced = [:]
-    node('gretl-j2') {
+    node(model.agentLabel) {
         try {
             deleteDir()
             echo "GRETL checkout-start ${System.currentTimeMillis()}"
@@ -156,18 +156,16 @@ def runJob(model, step, inputs, uploads, approvals, artifacts) {
                 withEnv(["OUTPUT_FILE=outputs/${out.path}"]) { sh 'mkdir -p -- "$(dirname -- "$OUTPUT_FILE")"' }
             }
             try {
-                container('gretl') {
-                    withEnv(["GRETL_SCRIPT=source/${scriptPath}", "HOME=${workspace}/work",
-                             "JAVA_TOOL_OPTIONS=-Duser.home=${workspace}/work -Djava.io.tmpdir=/tmp"]) {
-                        echo "GRETL runtime-start ${System.currentTimeMillis()}"
-                        timeout(time: job.execution.timeoutSeconds, unit: 'SECONDS') {
-                            sh '''
-                                set -eu
-                                java -version
-                                exec /opt/gretl/bin/gretl run "$GRETL_SCRIPT" --params-file "$PWD/parameters.json" \
-                                  --config "$PWD/runtime.json" --work-dir "$PWD/work" --report "$PWD/reports/run.json"
-                            '''
-                        }
+                withEnv(["GRETL_SCRIPT=source/${scriptPath}", "HOME=${workspace}/work",
+                         "JAVA_TOOL_OPTIONS=-Duser.home=${workspace}/work -Djava.io.tmpdir=/tmp"]) {
+                    echo "GRETL runtime-start ${System.currentTimeMillis()}"
+                    timeout(time: job.execution.timeoutSeconds, unit: 'SECONDS') {
+                        sh '''
+                            set -eu
+                            java -version
+                            exec /opt/gretl/bin/gretl run "$GRETL_SCRIPT" --params-file "$PWD/parameters.json" \
+                              --config "$PWD/runtime.json" --work-dir "$PWD/work" --report "$PWD/reports/run.json"
+                        '''
                     }
                 }
             } finally {

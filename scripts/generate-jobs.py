@@ -363,7 +363,7 @@ def principals(grant):
     return [("USER", user) for user in sorted(users)] + [("GROUP", group) for group in groups]
 
 
-def render(d, catalog, url, revision, runtime, pipeline):
+def render(d, catalog, url, revision, runtime, pipeline, agent_label="gretl-j4"):
     steps = d.get("steps") or [{"id": d["id"], "job": d["id"], "inputs": {
         name: {"fromInput": name} for name in d["parameters"]
     }}]
@@ -380,7 +380,7 @@ def render(d, catalog, url, revision, runtime, pipeline):
                 rights.add("hudson.model.Item.Configure")
     submitters = sorted({name for _, name in principals(d["access"].get("approve", {}))})
     jobs = {s["job"]: catalog[s["job"]] for s in steps if "job" in s}
-    model = dict(id=d["id"], url=url, revision=revision, runtime=runtime, jobs=jobs, steps=steps,
+    model = dict(id=d["id"], url=url, revision=revision, runtime=runtime, agentLabel=agent_label, jobs=jobs, steps=steps,
                  execution=d["execution"], parameters=d["parameters"], submitters=",".join(submitters))
     require(pipeline.count("'@MODEL@'") == 1, "expected one pipeline model placeholder")
     payload = json.dumps(model, ensure_ascii=True)
@@ -422,8 +422,10 @@ def main():
     parser.add_argument("repository", type=Path)
     parser.add_argument("--ref", default="HEAD")
     parser.add_argument("--runtime", required=True)
+    parser.add_argument("--agent-label", default="gretl-j4")
     parser.add_argument("--scripts", action="store_true", help="Print validated job script paths")
     args = parser.parse_args()
+    require(matches(args.agent_label, ID, 64), "invalid GRETL agent label")
     revision = git(args.repository, "rev-parse", "--verify", "--end-of-options", args.ref + "^{commit}")
     url = git(args.repository, "remote", "get-url", "origin")
     require(re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", url),
@@ -437,7 +439,7 @@ def main():
     pipeline = (ROOT / "jenkins/gretl.Jenkinsfile").read_text()
     exposed = [d for d in catalog.values() if d.get("exposed", True)]
     active = ", ".join(literal("gretl-" + d["id"]) for d in exposed)
-    scripts = [render(d, catalog, url, revision, args.runtime, pipeline) for d in exposed]
+    scripts = [render(d, catalog, url, revision, args.runtime, pipeline, args.agent_label) for d in exposed]
     # Preserve previous run histories while withdrawing jobs removed from the catalog.
     scripts.append(f"""jenkins.model.Jenkins.get().items.findAll {{
     it.class.name == "org.jenkinsci.plugins.workflow.job.WorkflowJob" &&
