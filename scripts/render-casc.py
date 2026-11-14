@@ -37,7 +37,7 @@ else:
             "spec": {
                 "automountServiceAccountToken": False,
                 "restartPolicy": "Never",
-                "securityContext": {"runAsNonRoot": True, "runAsGroup": 0, "fsGroup": 0,
+                "securityContext": {"runAsNonRoot": True, "fsGroup": 0,
                                     "seccompProfile": {"type": "RuntimeDefault"}},
                 "containers": [{
                     "name": "gretl", "image": args.image, "imagePullPolicy": "Never",
