@@ -15,7 +15,7 @@ jenkins rollout restart statefulset/jenkins
 jenkins rollout status statefulset/jenkins --timeout=180s
 if ! jenkins exec jenkins-0 -c jenkins -- sh -eu -c '
   test -s "$JENKINS_HOME/plugins/gretl-console/META-INF/MANIFEST.MF"
-  wget -qO /dev/null http://127.0.0.1:8080/plugin/gretl-console/css/console.css
+  curl -fso /dev/null http://127.0.0.1:8080/plugin/gretl-console/css/console.css
 '; then
   echo "The controller restarted but GRETL Console is unavailable" >&2
   exit 1

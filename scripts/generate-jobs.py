@@ -381,7 +381,8 @@ def render(d, catalog, url, revision, runtime, pipeline, agent_label="gretl-j4",
     if developer:
         # Overall/Administer already implies Job/Read and Job/Build. Do not
         # inherit ordinary operator grants for a job that runs branch code.
-        grants.clear()
+        grants = {principal: {"hudson.model.Item.Read"}
+                  for principal in principals(d["access"].get("approve", {}))}
     submitters = sorted({name for _, name in principals(d["access"].get("approve", {}))})
     jobs = {s["job"]: catalog[s["job"]] for s in steps if "job" in s}
     model = dict(id=d["id"], url=url, revision=revision, runtime=runtime, agentLabel=agent_label, jobs=jobs, steps=steps,
@@ -420,13 +421,17 @@ def render(d, catalog, url, revision, runtime, pipeline, agent_label="gretl-j4",
         if d["execution"]["serial"]:
             lines.append("    disableConcurrentBuilds()")
         if developer:
-            lines += ["    authorizationMatrix {", "      inheritanceStrategy { nonInheriting() }", "    }"]
+            lines += ["    authorizationMatrix {", "      inheritanceStrategy { nonInheriting() }"]
+        elif grants:
+            lines.append("    authorizationMatrix {")
         if grants:
-            lines += ["    authorizationMatrix {", "      entries {"]
+            lines.append("      entries {")
             for (kind, name), rights in sorted(grants.items()):
                 lines += [f"        {kind.lower()} {{", f"          name({literal(name)})",
                           f"          permissions([{', '.join(map(literal, sorted(rights)))}])", "        }"]
-            lines += ["      }", "    }"]
+            lines.append("      }")
+        if developer or grants:
+            lines.append("    }")
         if schedule:
             cron = "TZ=" + schedule["timeZone"] + "\n" + schedule["cron"]
             lines += ["    pipelineTriggers { triggers { cron { spec(" + literal(cron) + ") } } }"]
