@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Run the existing sleeping GRETL fixture and check Jenkins cancels it."""
+"""Inspect the timed-out GRETL process tree on the agent before workspace cleanup."""
 import argparse
 import importlib.util
 import json
 import os
 import re
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from urllib.request import Request
@@ -37,14 +36,28 @@ def main():
         "runtime": "gretl-j4-agent:local", "revision": revision,
         "agentLabel": os.environ.get("GRETL_AGENT_LABEL", "gretl-j4"),
         "parameters": {}, "submitters": "", "execution": {"timeoutSeconds": 180},
-        "steps": [{"id": "wait", "job": "wait", "inputs": {"mode": {"value": "wait"}}}],
+        "steps": [{"id": "wait", "job": "wait", "inputs": {}}],
         "jobs": {"wait": {"source": "testdata/jenkins/job.yaml", "script": "contract.groovy",
-                          "parameters": {"mode": {"name": "mode", "type": "text", "required": True}},
-                          "outputs": {}, "execution": {"timeoutSeconds": 12}}},
+                          "parameters": {},
+                          "outputs": {}, "execution": {"timeoutSeconds": 15}}},
     }
     generator = load("generate-jobs")
     script = (e2e.ROOT / "jenkins/gretl.Jenkinsfile").read_text()
     script = script.replace("'@MODEL@'", generator.literal(json.dumps(model)), 1)
+    # Stage only the synthetic fixture and observe on the same allocated node.
+    # Command, timeout and result handling remain those of the shared pipeline.
+    fixture = (e2e.ROOT / "fixtures/timeout-tree.groovy").read_text()
+    runtime = '            try {\n                withEnv(["GRETL_SCRIPT='
+    assert script.count(runtime) == 1
+    script = script.replace(runtime,
+                            "            writeFile(file: 'source/testdata/jenkins/contract.groovy', text: "
+                            + generator.literal(fixture) + ")\n" + runtime)
+    cleanup = "        } finally {\n            deleteDir()\n        }\n    }\n    return produced"
+    assert script.count(cleanup) == 1
+    inspection = (e2e.ROOT / "fixtures/timeout-tree-inspect.sh").read_text()
+    script = script.replace(cleanup, cleanup.replace(
+        "            deleteDir()", "            sh " + generator.literal(inspection) + "\n            deleteDir()"
+    ))
     xml = Element("flow-definition")
     definition = SubElement(xml, "definition", {"class": "org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition"})
     SubElement(definition, "script").text = script
@@ -62,26 +75,30 @@ def main():
         assert "ACCEPTANCE_PROCESS_STARTED" in log
         assert "ACCEPTANCE_PROCESS_FINISHED" not in log
         assert "GRETL exceeded its execution limit" in log
-        start = re.search(r"\[([^\]]+)\] GRETL runtime-start", log).group(1)
-        cancelled = re.search(r"\[([^\]]+)\].*exec timeout", log).group(1)
-        started_at = datetime.fromisoformat(start.replace("Z", "+00:00"))
-        invoked_at = datetime.fromisoformat(cancelled.replace("Z", "+00:00"))
-        assert 0 <= (invoked_at - started_at).total_seconds() < 10
-        result = admin.json(build + "api/json")
-        started = re.search(r"\[([^\]]+)\].*ACCEPTANCE_PROCESS_STARTED", log).group(1)
-        fixture_at = datetime.fromisoformat(started.replace("Z", "+00:00"))
-        duration = (result["timestamp"] + result["duration"]) / 1000 - fixture_at.timestamp()
-        assert 0 < duration < 35, f"Timed-out fixture remained active for {duration:.1f}s"
-        agent, workspace = re.search(r"Running on (\S+) in (\S+)", log).groups()
-        if args.standalone:
-            processes = subprocess.check_output(
-                ["docker", "top", "gretl-j4-standalone-agent", "-eo", "pid,args"], text=True
-            )
-            assert not any(workspace in line and "ch.so.agi.gretl.cli.Main" in line
-                           for line in processes.splitlines()), "GRETL was still running after Jenkins timed out"
-        else:
-            e2e.poll(lambda: f"pod/{agent}" not in e2e.kube("get", "pods", "-o", "name").splitlines(), seconds=150)
-        print(f"GRETL stopped in {duration:.1f}s after the fixture started", flush=True)
+        topology = {}
+        for role, pid, parent, group, started, state in re.findall(
+                r"TIMEOUT_TREE (gretl|child|grandchild) (\d+) (\d+) (\d+) (\d+) (\w+)$", log, re.M):
+            topology[role] = (int(pid), int(parent), int(group), int(started), state)
+        assert set(topology) == {"gretl", "child", "grandchild"}, topology
+        gretl, child, grandchild = (topology[role] for role in ("gretl", "child", "grandchild"))
+        assert child[1] == gretl[0] and grandchild[1] == child[0], topology
+        assert len({process[0] for process in topology.values()}) == 3
+        assert len({process[2] for process in topology.values()}) == 1
+        allowed_states = {"gone"} if args.standalone else {"gone", "Z"}
+        assert all(process[4] in allowed_states for process in topology.values()), topology
+        assert f"TIMEOUT_GROUP_STOPPED {gretl[2]}" in log and "TIMEOUT_GROUP_SURVIVOR" not in log
+        assert "GRETL JVM received TERM" in log and "(exit 137)" in log
+        start = re.search(r"\[([^\]]+)\] \+ exec timeout --kill-after=5s 15 ", log).group(1)
+        observed = re.search(r"\[([^\]]+)\] TIMEOUT_TREE gretl ", log).group(1)
+        elapsed = (datetime.fromisoformat(observed.replace("Z", "+00:00"))
+                   - datetime.fromisoformat(start.replace("Z", "+00:00"))).total_seconds()
+        assert 19 <= elapsed < 30, elapsed
+        if not args.standalone:
+            agent = re.search(r"Running on (\S+) in ", log).group(1)
+            e2e.poll(lambda: f"pod/{agent}" not in e2e.kube("get", "pods", "-o", "name").splitlines(),
+                     seconds=150)
+        print(f"TERM escalated to KILL. GRETL JVM, child and grandchild stopped on the same agent in {elapsed:.1f}s.",
+              flush=True)
     finally:
         admin.call(f"/job/{name}/doDelete", {}, expected=(302, 303, 404))
 

@@ -48,7 +48,7 @@ if ! "$python" scripts/standalone-agent.py "$port" > .local/standalone/agent.env
     docker logs --tail 80 "$name" >&2
     exit 1
 fi
-docker run -d --name "$name-agent" --network "$name" --restart unless-stopped \
+docker run -d --init --name "$name-agent" --network "$name" --restart unless-stopped \
   --cap-drop ALL --security-opt no-new-privileges --env-file .local/standalone/agent.env \
   --env "JENKINS_URL=http://$name:8080/" gretl-j4-agent:local >/dev/null
 expected=$(shasum -a 256 "$artifact" | cut -d' ' -f1)

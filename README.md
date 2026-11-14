@@ -162,3 +162,25 @@ vergleicht den relevanten Schema-V2-Vertrag mit dem Deployment. Setze
 `GRETL_DEV_BRANCHES_ENABLED=false` bei der Provisionierung, um die
 Entwickler-Jobs zu deaktivieren. Die bestehenden Run-Historien bleiben
 in Jenkins erhalten. Setze diesen Wert für Produktionsdeployments.
+
+### J4-Regressionsprüfungen
+
+Führe die Prüfungen nacheinander am dedizierten Labor aus. Der Queue-Test
+legt einen temporären Branch im GRETL-Job-Repository an, verschiebt ihn
+während der Wartezeit per Fast-Forward und löscht ihn danach. Verwende für
+`--new-head` einen lokalen Nachfolger des bereitgestellten Katalog-Commits
+mit demselben Schema-V2-Vertrag und setze dessen SHA als `TEST_COMMIT`.
+GitHub-Schreibrechte sind erforderlich.
+
+```sh
+source scripts/env.sh
+.local/j2-venv/bin/python scripts/j4-queue.py --port 18082 \
+  --jobs ../gretl-runtime-jobs --new-head "$TEST_COMMIT" \
+  --evidence ../gretl-jenkins-spec/evidence/queue
+.local/j2-venv/bin/python scripts/j4-timeout.py --port 18082 \
+  --evidence ../gretl-jenkins-spec/evidence/timeout
+```
+
+Für Standalone verwende jeweils `--standalone --port 18083`. Der
+Timeout-Test prüft den GRETL-Prozess samt Kind und Enkel in derselben
+Prozessgruppe noch auf dem Agenten, bevor Jenkins den Workspace aufräumt.
