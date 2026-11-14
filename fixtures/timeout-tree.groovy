@@ -1,12 +1,13 @@
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 action('fixture') {
     Path work = Path.of(System.getenv('HOME'))
     Files.writeString(work.resolve('gretl.pid'), "${ProcessHandle.current().pid()}\n")
     Runtime.runtime.addShutdownHook(new Thread({
-        Files.writeString(work.resolve('term-seen'), "GRETL JVM received TERM ${Instant.now()}")
+        Files.writeString(work.resolve('term-seen'), "GRETL JVM received TERM ${Instant.now().truncatedTo(ChronoUnit.MILLIS)}")
         Thread.sleep(60_000L)
     } as Runnable))
 
