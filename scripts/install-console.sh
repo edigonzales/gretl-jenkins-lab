@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
+artifact=${1:-"$root/../gretl-jenkins-plugin/target/gretl-console.hpi"}
 cd "$root"
-artifact=console-plugin/target/gretl-console.hpi
-[[ -s $artifact ]] || { echo "Build with mvn -f console-plugin/pom.xml verify first" >&2; exit 1; }
+[[ -s $artifact ]] || { echo "Run Maven verify in gretl-jenkins-plugin or pass the built HPI" >&2; exit 1; }
 # The plugin resides on the existing Jenkins PVC. Publish it atomically so the
 # next controller can only see a complete archive.
 jenkins exec -i jenkins-0 -c jenkins -- sh -eu -c '
@@ -13,3 +13,10 @@ jenkins exec -i jenkins-0 -c jenkins -- sh -eu -c '
 ' < "$artifact"
 jenkins rollout restart statefulset/jenkins
 jenkins rollout status statefulset/jenkins --timeout=180s
+if ! jenkins exec jenkins-0 -c jenkins -- sh -eu -c '
+  test -s "$JENKINS_HOME/plugins/gretl-console/META-INF/MANIFEST.MF"
+  wget -qO /dev/null http://127.0.0.1:8080/plugin/gretl-console/css/console.css
+'; then
+  echo "The controller restarted but GRETL Console is unavailable" >&2
+  exit 1
+fi
