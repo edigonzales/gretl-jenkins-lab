@@ -67,7 +67,7 @@ def main():
                 ["docker", "top", "gretl-j4-standalone-agent", "-eo", "pid,args"], text=True
             )
             assert not any(workspace in line and "ch.so.agi.gretl.cli.Main" in line
-                           for line in processes.splitlines())
+                           for line in processes.splitlines()), "GRETL was still running after Jenkins timed out"
         else:
             e2e.poll(lambda: f"pod/{agent}" not in e2e.kube("get", "pods", "-o", "name").splitlines(), seconds=150)
     finally:
