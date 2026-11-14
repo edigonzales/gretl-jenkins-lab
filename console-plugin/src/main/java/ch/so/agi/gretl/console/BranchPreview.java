@@ -6,11 +6,13 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.Semaphore;
 import java.util.regex.Pattern;
 import net.sf.json.JSONException;
 import net.sf.json.JSONObject;
 
 public final class BranchPreview {
+    private static final Semaphore LOOKUPS = new Semaphore(2);
     private static final Pattern SHA = Pattern.compile("[a-f0-9]{40}");
     private static final Pattern SOURCE = Pattern.compile("(?:jobs/[a-z0-9-]+/job|flows/[a-z0-9-]+/flow)\\.yaml");
     private final String repository;
@@ -34,6 +36,10 @@ public final class BranchPreview {
         if (!validBranch(branch)) {
             return new BranchPreview(repository, "", deployed, source, null, "Ungültiger Git-Branchname.");
         }
+        if (!LOOKUPS.tryAcquire()) {
+            return new BranchPreview(repository, branch, deployed, source, null,
+                    "Die Branch-Vorschau ist ausgelastet. Versuche es erneut.");
+        }
         try {
             String commit = resolveCommit(repository, branch);
             if (commit != null) {
@@ -43,6 +49,8 @@ public final class BranchPreview {
         } catch (IOException | URISyntaxException | JSONException e) {
             return new BranchPreview(repository, branch, deployed, source, null,
                     "GitHub konnte den Branch gerade nicht auflösen. Versuche es erneut.");
+        } finally {
+            LOOKUPS.release();
         }
     }
 
