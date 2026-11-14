@@ -2,12 +2,12 @@
 """Run the existing sleeping GRETL fixture and check Jenkins cancels it."""
 import argparse
 import importlib.util
+import json
 import os
 from pathlib import Path
 from urllib.request import Request
 from xml.etree.ElementTree import Element, SubElement, tostring
 from uuid import uuid4
-
 
 
 def load(name):
@@ -18,6 +18,7 @@ def load(name):
 
 
 e2e = load("j2-e2e")
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -39,7 +40,6 @@ def main():
                           "outputs": {}, "execution": {"timeoutSeconds": 12}}},
     }
     generator = load("generate-jobs")
-    import json
     script = (e2e.ROOT / "jenkins/gretl.Jenkinsfile").read_text()
     script = script.replace("'@MODEL@'", generator.literal(json.dumps(model)), 1)
     xml = Element("flow-definition")
