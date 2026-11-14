@@ -139,6 +139,7 @@ def main():
     parser.add_argument("--large", action="store_true")
     parser.add_argument("--flows-only", action="store_true")
     parser.add_argument("--examples", action="store_true")
+    parser.add_argument("--serial", action="store_true")
     parser.add_argument("--skip-flows", action="store_true")
     args = parser.parse_args()
     evidence = args.evidence
@@ -193,6 +194,16 @@ def main():
         computers = admin.json("/computer/api/json?tree=computer[displayName,executors[currentExecutable[url]]]")
         assert not any((e.get("currentExecutable") or {}).get("url", "").endswith(flow)
                        for c in computers["computer"] for e in c["executors"])
+        second = None
+        if args.serial:
+            second = operator.start("csv-publication", upload=("inputFile", "publication.csv", publication))
+            def blocked():
+                item = admin.json(second + "api/json")
+                assert not item.get("executable"), "Serial flow started during pending approval"
+                return item if item.get("blocked") else None
+
+            poll(blocked)
+            print("Serial flow queued without occupying the agent", flush=True)
         form = {"json": json.dumps({"parameter": [{"name": "publicationNote", "value": "Freigabe Zürich"}]}),
                 "proceed": "Proceed"}
         denied, _ = operator.call(flow + "input/Review/proceed", form, expected=(400, 403))
@@ -213,7 +224,11 @@ def main():
         assert reviewer.call(flow + "artifact/publish/published.csv")[0] == publication
         assert reviewer.json(flow + "artifact/publish/publication.json")["note"] == "Freigabe Zürich"
 
-        flow = start_flow(operator)
+        if second:
+            flow = queued_build(admin, second)
+            poll(lambda: b"Proceed" in admin.call(flow + "input/Review/", expected=(200, 404))[0])
+        else:
+            flow = start_flow(operator)
         reviewer.call(flow + "input/Review/abort", {}, expected=(200, 302, 303))
         finish(admin, flow, "ABORTED", evidence)
         reviewer.call(flow + "artifact/publish/published.csv", expected=(404,))
