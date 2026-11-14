@@ -9,6 +9,5 @@ image=$(
     --output .local/j2-image --source "$revision" >&2
   python3 -c 'import json; print(json.load(open(".local/j2-image/candidate.json"))["buildCommand"][-2])'
 )
-k3d image import "$image" --cluster "$lab" >&2
 docker run --rm --entrypoint java "$image" -version >&2
 printf '%s\n' "$image"

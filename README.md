@@ -110,38 +110,78 @@ nacheinander auf dem dedizierten Labor aus.
   --evidence ../gretl-jenkins-spec/evidence/acceptance-extra
 ```
 
-## GRETL Console (J3)
+## J4 mit GRETL 6
 
-Die Console wird als Jenkins-Plugin im vorhandenen Labor installiert.
+Katalog und Pipeline sind in beiden Umgebungen gleich. Das Agent-Image
+verwendet Java 25 und die Distribution des generischen GRETL-6-Images.
+Erstelle zuerst das HPI mit `mvn -B -ntp verify` im
+[GRETL Console Repository](https://github.com/edigonzales/gretl-jenkins-plugin).
 
-```sh
-mvn -f console-plugin/pom.xml verify
-./scripts/deploy-jobs.sh
-./scripts/install-console.sh
-```
+### Standalone
 
-Öffne [GRETL Console](http://127.0.0.1:18082/gretl-console/) im Labor.
-Die Console zeigt für die aktuelle Jenkins-Anmeldung lesbare GRETL-Jobs.
-Operatoren können sie aus dem Formular starten. Die Eingabemaske verwendet
-Datumsauswahl, numerische Felder und die fachlichen Auswahlbezeichnungen aus
-Schema V2. Die Historie verlinkt die nativen Buildlogs, Artefakte und offenen
-Freigaben. Die Rollen und Zugangsdaten entsprechen J2.
+Starte in diesem Repository `./scripts/standalone-up.sh`. Das Skript
+verwendet den dedizierten Lima-Docker, ein eigenes Netzwerk und ein
+Jenkins-Datenvolume. Mit `./scripts/standalone-open.sh` erreichst du die
+Console unter `http://127.0.0.1:18083/gretl-console/`. Die Testzugänge liegen
+in der lokalen Datei `.local/standalone/users.env`. Mit
+`./scripts/standalone-test.sh /absoluter/evidence-pfad` prüfst du
+Upload, Publikation, Freigabe und Neustart. `./scripts/standalone-down.sh`
+stoppt Controller und Agent und behält das Jenkins-Datenvolume.
 
-Der Generator schreibt die Anzeigemetadaten beim Deployment in die
-Jobdefinition. Die Formulare senden direkt an den nativen Jenkins-Build-Endpunkt.
-Dateien verarbeitet das File Parameter Plugin. Zeitpläne, Queue, Revision und
-Freigaben folgen der bereitgestellten J2-Konfiguration. Unter
-**Git-Branch-Vorschau** lässt sich der Name eines Branches im öffentlichen
-Job-Repository eingeben. Die Console zeigt dessen vollständigen Commit-SHA
-und verlinkt die Schema-V2-Datei an diesem Commit. Jeder Aufruf löst den Branch
-erneut auf. Für Jobstarts gilt der bereitgestellte Commit, den der
-Administrator über den J2-Deploymentpfad mit `JOBS_REF` festlegt.
+### k3d
 
-`install-console.sh` ersetzt das Plugin auf dem bestehenden PVC und startet
-den Jenkins-Controller neu. Das Browser-Skript nutzt die Playwright-Umgebung
-aus J2.
+`./scripts/up.sh` startet das Labor. Installiere das HPI mit
+`./scripts/install-console.sh`, provisioniere die Jobs mit
+`./scripts/deploy-jobs.sh` und öffne den Port mit `./scripts/open.sh 18082`.
+Die Console ist unter `http://127.0.0.1:18082/gretl-console/` verfügbar.
+`./scripts/smoke.sh 18082` prüft die historischen Benchmark-Fixtures.
+Die bestehende Browser-Suite läuft mit der Playwright-Umgebung aus J2.
 
 ```sh
 .local/j2-browser/bin/python scripts/j3-browser.py --port 18082 \
-  --evidence ../gretl-jenkins-spec/evidence/j3/browser
+  --evidence ../gretl-jenkins-spec/evidence/j4-browser
 ```
+
+### Katalog und Branches
+
+Beide Installationen verwenden standardmässig den Git-Commit aus
+`jenkins/j2-jobs-ref`. `JOBS_REF` wählt beim administrativen Deployment
+einen anderen bereits veröffentlichten Katalogstand. `GRETL_AGENT_LABEL`
+wählt das Agent-Label aus der Deployment-Konfiguration.
+
+In der Console lädt der Operator seine CSV-Datei im Job **CSV prüfen und
+veröffentlichen** hoch. Der Reviewer öffnet die Freigabe des Runs, prüft
+den Bericht und trägt den Publikationshinweis ein. Der Run archiviert
+die veröffentlichte CSV und das Manifest.
+
+Der Entwicklungsmodus des Labors erzeugt für jede veröffentlichte
+Katalogdefinition einen separaten Administrator-Job. Löse in der
+Branch-Vorschau einen Branch auf und wähle **Mit diesem Branch starten**.
+Jenkins pinnt die ausgewählte Spitze vor der GRETL-Ausführung und
+vergleicht den relevanten Schema-V2-Vertrag mit dem Deployment. Setze
+`GRETL_DEV_BRANCHES_ENABLED=false` bei der Provisionierung, um die
+Entwickler-Jobs zu deaktivieren. Die bestehenden Run-Historien bleiben
+in Jenkins erhalten. Setze diesen Wert für Produktionsdeployments.
+
+### J4-Regressionsprüfungen
+
+Führe die Prüfungen nacheinander am dedizierten Labor aus. Der Queue-Test
+legt einen temporären Branch im GRETL-Job-Repository an, verschiebt ihn
+während der Wartezeit per Fast-Forward und löscht ihn danach. Verwende für
+`--new-head` einen lokalen Nachfolger des bereitgestellten Katalog-Commits
+mit demselben Schema-V2-Vertrag und setze dessen SHA als `TEST_COMMIT`.
+GitHub-Schreibrechte sind erforderlich.
+
+```sh
+.local/j2-venv/bin/python scripts/test-j4-queue.py
+source scripts/env.sh
+.local/j2-venv/bin/python scripts/j4-queue.py --port 18082 \
+  --jobs ../gretl-runtime-jobs --new-head "$TEST_COMMIT" \
+  --evidence ../gretl-jenkins-spec/evidence/queue
+.local/j2-venv/bin/python scripts/j4-timeout.py --port 18082 \
+  --evidence ../gretl-jenkins-spec/evidence/timeout
+```
+
+Für Standalone verwende jeweils `--standalone --port 18083`. Der
+Timeout-Test prüft den GRETL-Prozess samt Kind und Enkel in derselben
+Prozessgruppe noch auf dem Agenten, bevor Jenkins den Workspace aufräumt.

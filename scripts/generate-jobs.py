@@ -363,7 +363,7 @@ def principals(grant):
     return [("USER", user) for user in sorted(users)] + [("GROUP", group) for group in groups]
 
 
-def render(d, catalog, url, revision, runtime, pipeline):
+def render(d, catalog, url, revision, runtime, pipeline, agent_label="gretl-j4", developer=False):
     steps = d.get("steps") or [{"id": d["id"], "job": d["id"], "inputs": {
         name: {"fromInput": name} for name in d["parameters"]
     }}]
@@ -378,10 +378,18 @@ def render(d, catalog, url, revision, runtime, pipeline):
                 rights.add("hudson.model.Item.Build")
             if action == "manage":
                 rights.add("hudson.model.Item.Configure")
+    if developer:
+        # Overall/Administer already implies Job/Read and Job/Build. Do not
+        # inherit ordinary operator grants for a job that runs branch code.
+        grants = {principal: {"hudson.model.Item.Read"}
+                  for principal in principals(d["access"].get("approve", {}))}
     submitters = sorted({name for _, name in principals(d["access"].get("approve", {}))})
     jobs = {s["job"]: catalog[s["job"]] for s in steps if "job" in s}
-    model = dict(id=d["id"], url=url, revision=revision, runtime=runtime, jobs=jobs, steps=steps,
+    model = dict(id=d["id"], url=url, revision=revision, runtime=runtime, agentLabel=agent_label, jobs=jobs, steps=steps,
                  execution=d["execution"], parameters=d["parameters"], submitters=",".join(submitters))
+    if developer:
+        model["developer"] = True
+        model["contracts"] = sorted({d["source"], *(job["source"] for job in jobs.values())})
     require(pipeline.count("'@MODEL@'") == 1, "expected one pipeline model placeholder")
     payload = json.dumps(model, ensure_ascii=True)
     script = pipeline.replace("'@MODEL@'", literal(payload), 1)
@@ -390,30 +398,48 @@ def render(d, catalog, url, revision, runtime, pipeline):
     console = dict(schemaVersion=2, id=d["id"], revision=revision, url=url, runtime=runtime,
                    parameters=list(d["parameters"].values()), schedule=d.get("schedule"),
                    serial=d["execution"]["serial"], flow="steps" in d, source=d.get("source"))
+    if developer:
+        console["developer"] = True
+        console["schedule"] = None
     metadata = base64.b64encode(json.dumps(console).encode()).decode()
     encoded = base64.b64encode(script.encode()).decode()
-    lines = [f"pipelineJob({literal('gretl-' + d['id'])}) {{", f"  displayName({literal(d['name'])})",
+    name = ("gretl-dev-" if developer else "gretl-") + d["id"]
+    title = d["name"] + (" (Entwicklung)" if developer else "")
+    lines = [f"pipelineJob({literal(name)}) {{", f"  displayName({literal(title)})",
              f"  description({literal(d['description'])})", "  disabled(false)"]
-    if d["parameters"]:
-        lines += ["  parameters {", *("    " + render_parameter(p) for p in d["parameters"].values()), "  }"]
-    if d["execution"]["serial"] or grants or "schedule" in d:
+    parameters = [render_parameter(p) for p in d["parameters"].values()]
+    if developer:
+        parameters.extend([
+            "stringParam('GRETL_DEV_BRANCH', '', 'Git-Branch')",
+            "stringParam('GRETL_DEV_SHA', '', 'Vollständiger ausgewählter Git-Commit')",
+        ])
+    if parameters:
+        lines += ["  parameters {", *("    " + parameter for parameter in parameters), "  }"]
+    schedule = None if developer else d.get("schedule")
+    if d["execution"]["serial"] or grants or schedule or developer:
         lines.append("  properties {")
         if d["execution"]["serial"]:
             lines.append("    disableConcurrentBuilds()")
+        if developer:
+            lines += ["    authorizationMatrix {", "      inheritanceStrategy { nonInheriting() }"]
+        elif grants:
+            lines.append("    authorizationMatrix {")
         if grants:
-            lines += ["    authorizationMatrix {", "      entries {"]
+            lines.append("      entries {")
             for (kind, name), rights in sorted(grants.items()):
                 lines += [f"        {kind.lower()} {{", f"          name({literal(name)})",
                           f"          permissions([{', '.join(map(literal, sorted(rights)))}])", "        }"]
-            lines += ["      }", "    }"]
-        if "schedule" in d:
-            schedule = d["schedule"]
+            lines.append("      }")
+        if developer or grants:
+            lines.append("    }")
+        if schedule:
             cron = "TZ=" + schedule["timeZone"] + "\n" + schedule["cron"]
             lines += ["    pipelineTriggers { triggers { cron { spec(" + literal(cron) + ") } } }"]
         lines.append("  }")
     lines += ["  configure { project ->",
-              f"    project / 'properties' / 'ch.so.agi.gretl.console.ConsoleMetadata' {{ encoded('{metadata}') }}",
-              "  }"]
+              "    if (jenkins.model.Jenkins.get().pluginManager.getPlugin('gretl-console')?.active) {",
+              f"      project / 'properties' / 'ch.so.agi.gretl.console.ConsoleMetadata' {{ encoded('{metadata}') }}",
+              "    }", "  }"]
     lines += ["  definition { cps {", f"    script(new String('{encoded}'.decodeBase64(), 'UTF-8'))",
               "    sandbox()", "  } }", "}"]
     return "\n".join(lines)
@@ -424,8 +450,12 @@ def main():
     parser.add_argument("repository", type=Path)
     parser.add_argument("--ref", default="HEAD")
     parser.add_argument("--runtime", required=True)
+    parser.add_argument("--agent-label", default="gretl-j4")
+    parser.add_argument("--dev-branches", action="store_true", help="Provision admin-only developer jobs")
     parser.add_argument("--scripts", action="store_true", help="Print validated job script paths")
     args = parser.parse_args()
+    require(matches(args.agent_label, ID, 64) and args.agent_label not in {"built-in", "master"},
+            "expected a dedicated GRETL agent label")
     revision = git(args.repository, "rev-parse", "--verify", "--end-of-options", args.ref + "^{commit}")
     url = git(args.repository, "remote", "get-url", "origin")
     require(re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", url),
@@ -438,8 +468,16 @@ def main():
         return
     pipeline = (ROOT / "jenkins/gretl.Jenkinsfile").read_text()
     exposed = [d for d in catalog.values() if d.get("exposed", True)]
-    active = ", ".join(literal("gretl-" + d["id"]) for d in exposed)
-    scripts = [render(d, catalog, url, revision, args.runtime, pipeline) for d in exposed]
+    require(not any(id.startswith("dev-") for id in catalog), "catalog IDs beginning with dev- are reserved")
+    names = ["gretl-" + d["id"] for d in exposed]
+    scripts = [render(d, catalog, url, revision, args.runtime, pipeline, args.agent_label) for d in exposed]
+    if args.dev_branches:
+        developer_names = ["gretl-dev-" + d["id"] for d in exposed]
+        require(not set(names).intersection(developer_names), "developer job names collide with catalog IDs")
+        names.extend(developer_names)
+        scripts.extend(render(d, catalog, url, revision, args.runtime, pipeline, args.agent_label, developer=True)
+                       for d in exposed)
+    active = ", ".join(map(literal, names))
     # Preserve previous run histories while withdrawing jobs removed from the catalog.
     scripts.append(f"""jenkins.model.Jenkins.get().items.findAll {{
     it.class.name == "org.jenkinsci.plugins.workflow.job.WorkflowJob" &&
