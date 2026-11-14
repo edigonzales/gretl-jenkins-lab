@@ -3,6 +3,12 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 cd "$root"
 platform=${1:-k3d}
+dev=()
+case ${GRETL_DEV_BRANCHES_ENABLED:-true} in
+    true) dev=(--dev-branches) ;;
+    false) ;;
+    *) echo "GRETL_DEV_BRANCHES_ENABLED must be true or false" >&2; exit 2 ;;
+esac
 [[ $platform == k3d || $platform == standalone ]] || { echo "Expected k3d or standalone" >&2; exit 2; }
 repository=${JOBS_REPOSITORY:-../gretl-runtime-jobs}
 python=${GRETL_J2_PYTHON:-.local/j2-venv/bin/python}
@@ -21,7 +27,7 @@ cleanup() {
 }
 trap cleanup EXIT
 revision=$(git -C "$repository" rev-parse --verify --end-of-options "${JOBS_REF:-$(cat jenkins/j2-jobs-ref)}^{commit}")
-"$python" scripts/generate-jobs.py "$repository" --ref "$revision" --runtime "$image" --agent-label gretl-j4 > "$candidate"
+"$python" scripts/generate-jobs.py "$repository" --ref "$revision" --runtime "$image" --agent-label "${GRETL_AGENT_LABEL:-gretl-j4}" ${dev[@]+"${dev[@]}"} > "$candidate"
 if ! git -C "$repository" branch -r --contains "$revision" | grep -q 'origin/'; then
   echo "Publish jobs commit $revision to origin and fetch its tracking branch first" >&2
   exit 1

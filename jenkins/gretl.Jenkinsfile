@@ -117,6 +117,70 @@ def materialize(name, binding, inputs, uploads, approvals, artifacts) {
     return inputs[binding.fromInput]
 }
 
+def pinDevelopmentRevision(model, branch, revision) {
+    if (!(branch instanceof String) || !branch || branch.length() > 255 ||
+            branch.startsWith('-') || branch.startsWith('refs/') || branch.startsWith('@') ||
+            !(revision instanceof String) || !(revision ==~ /[a-f0-9]{40}/)) {
+        error('Select a Git branch and its full 40-character commit SHA')
+    }
+    node(model.agentLabel) {
+        try {
+            deleteDir()
+            withEnv(["GRETL_BRANCH=${branch}", "GRETL_SHA=${revision}", "GRETL_REPOSITORY=${model.url}"]) {
+                sh '''
+                    set -eu
+                    if ! git check-ref-format "refs/heads/$GRETL_BRANCH"; then
+                        echo 'Invalid GRETL Git branch' >&2
+                        exit 1
+                    fi
+                    git init -q
+                    git fetch --no-tags "$GRETL_REPOSITORY" "refs/heads/$GRETL_BRANCH"
+                    if [ "$(git rev-parse FETCH_HEAD)" != "$GRETL_SHA" ]; then
+                        echo 'The branch head changed. Select the branch again.' >&2
+                        exit 1
+                    fi
+                '''
+            }
+            withEnv(["GRETL_SHA=${revision}", "GRETL_DEPLOYED=${model.revision}",
+                     "GRETL_REPOSITORY=${model.url}"]) {
+                sh '''
+                    set -eu
+                    if ! git cat-file -e "$GRETL_DEPLOYED^{commit}" 2>/dev/null; then
+                        git fetch --no-tags "$GRETL_REPOSITORY" "$GRETL_DEPLOYED"
+                    fi
+                '''
+                model.contracts.each { path ->
+                    withEnv(["GRETL_CONTRACT=${path}"]) {
+                        sh '''
+                            set -eu
+                            if ! git diff --quiet "$GRETL_DEPLOYED" "$GRETL_SHA" -- "$GRETL_CONTRACT"; then
+                                echo "The deployed Schema V2 contract changed: $GRETL_CONTRACT. Deploy the new catalog first." >&2
+                                exit 1
+                            fi
+                        '''
+                    }
+                }
+                model.jobs.values().each { job ->
+                    String path = job.source.substring(0, job.source.lastIndexOf('/')) + '/' + job.script
+                    withEnv(["GRETL_JOB_SCRIPT=${path}"]) {
+                        sh '''
+                            set -eu
+                            mode=$(git ls-tree "$GRETL_SHA" -- "$GRETL_JOB_SCRIPT" | cut -d' ' -f1)
+                            case "$mode" in 100644|100755) ;; *)
+                                echo "GRETL job script must be a regular Git file: $GRETL_JOB_SCRIPT" >&2
+                                exit 1
+                            esac
+                        '''
+                    }
+                }
+            }
+        } finally {
+            deleteDir()
+        }
+    }
+    return revision
+}
+
 def runJob(model, step, inputs, uploads, approvals, artifacts) {
     def job = model.jobs[step.job]
     def produced = [:]
@@ -210,11 +274,11 @@ def runJob(model, step, inputs, uploads, approvals, artifacts) {
 }
 
 timestamps {
-    currentBuild.description = "${model.id} @ ${model.revision.take(12)}"
-    echo "GRETL ${model.id} build ${env.BUILD_NUMBER} source ${model.url}@${model.revision} runtime ${model.runtime}"
     def requester = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause').find { it.userId }?.userId
     boolean scheduled = !currentBuild.getBuildCauses('hudson.triggers.TimerTrigger$TimerTriggerCause').isEmpty()
-    def unexpected = params.keySet() - model.parameters.keySet().collect { "J2_${it}".toString() }
+    def allowed = model.parameters.keySet().collect { "J2_${it}".toString() }
+    if (model.developer) allowed.addAll(['GRETL_DEV_BRANCH', 'GRETL_DEV_SHA'])
+    def unexpected = params.keySet() - allowed
     if (unexpected) error("Unexpected parameters: ${unexpected}")
     def filenames = [:]
     model.parameters.each { name, p ->
@@ -223,8 +287,15 @@ timestamps {
     // Capture plugin metadata before removing exported build parameters from subprocesses.
     def cleared = model.parameters.keySet().collect { "J2_${it}=" }
     cleared.addAll(filenames.keySet().collect { "J2_${it}_FILENAME=" })
+    if (model.developer) cleared.addAll(['GRETL_DEV_BRANCH=', 'GRETL_DEV_SHA='])
     withEnv(cleared) {
         timeout(time: model.execution.timeoutSeconds, unit: 'SECONDS') {
+            if (model.developer) {
+                model.revision = pinDevelopmentRevision(model, params.GRETL_DEV_BRANCH, params.GRETL_DEV_SHA)
+                echo "GRETL development branch ${params.GRETL_DEV_BRANCH} pinned to ${model.revision}"
+            }
+            currentBuild.description = "${model.id} @ ${model.revision.take(12)}"
+            echo "GRETL ${model.id} build ${env.BUILD_NUMBER} source ${model.url}@${model.revision} runtime ${model.runtime}"
             def inputs = [:]
             def uploads = [:]
             model.parameters.each { name, p ->
