@@ -5,7 +5,6 @@ import importlib.util
 import json
 import os
 import re
-from datetime import datetime
 from pathlib import Path
 from urllib.request import Request
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -44,14 +43,17 @@ def main():
     generator = load("generate-jobs")
     script = (e2e.ROOT / "jenkins/gretl.Jenkinsfile").read_text()
     script = script.replace("'@MODEL@'", generator.literal(json.dumps(model)), 1)
-    # Stage only the synthetic fixture and observe on the same allocated node.
-    # Command, timeout and result handling remain those of the shared pipeline.
+    # Instrument only the synthetic job. All three samples use agent uptime.
     fixture = (e2e.ROOT / "fixtures/timeout-tree.groovy").read_text()
     runtime = '            try {\n                withEnv(["GRETL_SCRIPT='
     assert script.count(runtime) == 1
     script = script.replace(runtime,
                             "            writeFile(file: 'source/testdata/jenkins/contract.groovy', text: "
                             + generator.literal(fixture) + ")\n" + runtime)
+    command = '                            exec timeout --kill-after=5s '
+    assert script.count(command) == 1
+    script = script.replace(command, '                            read -r started remainder < /proc/uptime\n'
+                            '                            echo "$started" > work/timeout-start\n' + command)
     cleanup = "        } finally {\n            deleteDir()\n        }\n    }\n    return produced"
     assert script.count(cleanup) == 1
     inspection = (e2e.ROOT / "fixtures/timeout-tree-inspect.sh").read_text()
@@ -92,13 +94,12 @@ def main():
         assert all(process[4] in allowed_states for process in topology.values()), topology
         assert f"TIMEOUT_GROUP_STOPPED {gretl[2]}" in log and "TIMEOUT_GROUP_SURVIVOR" not in log
         assert "(exit 137)" in log
-        start = re.search(r"\[([^\]]+)\] \+ exec timeout --kill-after=5s 15 ", log).group(1)
-        signal = re.search(r"GRETL JVM received TERM (\S+)", log).group(1)
-        observed = re.search(r"\[([^\]]+)\] TIMEOUT_TREE gretl ", log).group(1)
-        started_at, signaled_at, observed_at = (datetime.fromisoformat(t.replace("Z", "+00:00"))
-                                                for t in (start, signal, observed))
-        term_elapsed = (signaled_at - started_at).total_seconds()
-        elapsed = (observed_at - started_at).total_seconds()
+        assert '+ exec timeout --kill-after=5s 15 ' in log
+        started_at, signaled_at, observed_at = (float(sample) for sample in re.findall(
+            r"(?:TIMEOUT_START|GRETL JVM received TERM|TIMEOUT_OBSERVED) ([0-9]+\.[0-9]+)$", log, re.M
+        ))
+        term_elapsed = signaled_at - started_at
+        elapsed = observed_at - started_at
         assert 14 <= term_elapsed < 19, term_elapsed
         assert 19 <= elapsed < 30, elapsed
         if not args.standalone:

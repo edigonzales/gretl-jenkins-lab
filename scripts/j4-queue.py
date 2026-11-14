@@ -15,6 +15,54 @@ spec.loader.exec_module(e2e)
 REMOTE = "https://github.com/edigonzales/gretl-runtime-jobs.git"
 
 
+def settle_build(admin, job, queue, build=None):
+    if queue is None:
+        return
+    queue_id = int(queue.strip("/").split("/")[-1])
+
+    def find_build_or_cancel():
+        try:
+            item = admin.json(queue + "api/json")
+        except e2e.JenkinsError as error:
+            if error.status != 404:
+                raise
+            item = {}
+        if item.get("cancelled"):
+            return (None,)
+        if executable := item.get("executable"):
+            return (e2e.urlsplit(executable["url"]).path,)
+        if item:
+            try:
+                admin.call(f"/queue/cancelItem?id={queue_id}", {}, expected=(204,))
+                return (None,)
+            except e2e.JenkinsError as error:
+                if error.status not in (404, 500):
+                    raise
+        for run in admin.json(job + "api/json?tree=builds[queueId,url]")["builds"]:
+            if run.get("queueId") == queue_id:
+                return (e2e.urlsplit(run["url"]).path,)
+        # A failed cancel and an absent build can both occur during promotion.
+        # Wait for positive evidence of cancellation or the matching build.
+        return None
+
+    def build_state():
+        try:
+            return admin.json(build + "api/json?tree=building")
+        except e2e.JenkinsError as error:
+            if error.status != 404:
+                raise
+            return None
+
+    try:
+        if build is None:
+            (build,) = e2e.poll(find_build_or_cancel, seconds=60)
+        if build is not None and e2e.poll(build_state, seconds=60)["building"]:
+            admin.call(build + "stop", {}, expected=(200, 302, 303))
+            e2e.poll(lambda: (state := build_state()) and not state["building"], seconds=60)
+    except TimeoutError as error:
+        raise TimeoutError(f"Could not settle J4 queue item {queue_id}, build {build}") from error
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, required=True)
@@ -60,15 +108,6 @@ def main():
 
     def checkouts(log):
         return re.findall(r"GRETL checkout-end (\d+) ([a-f0-9]{40})", log)
-
-    def is_waiting(queue):
-        try:
-            item = admin.json(queue + "api/json")
-        except e2e.JenkinsError as error:
-            if error.status == 404:
-                return False
-            raise
-        return not (item.get("cancelled") or item.get("executable"))
 
     first = second = blocker = rejected = None
     assert head() is None
@@ -119,29 +158,10 @@ def main():
         print(f"{branch} moved {old} -> {new} while {second} was blocked. {rejected} rejected before GRETL.")
     finally:
         try:
-            queue_ids = set()
-            for queue in (second, first):
-                if queue is None:
-                    continue
-                queue_id = int(queue.strip("/").split("/")[-1])
-                queue_ids.add(queue_id)
-                if is_waiting(queue):
-                    try:
-                        admin.call(f"/queue/cancelItem?id={queue_id}", {}, expected=(200, 204, 302, 303))
-                    except e2e.JenkinsError as error:
-                        if error.status not in (404, 500) or is_waiting(queue):
-                            raise
-            # Started builds outlive their queue entries. Include already known paths
-            # and resolve any handoff that took place before cancellation.
-            builds = {build for build in (blocker, rejected) if build}
-            if queue_ids:
-                builds.update(e2e.urlsplit(run["url"]).path for run in admin.json(
-                    job + "api/json?tree=builds[queueId,url]"
-                )["builds"] if run["queueId"] in queue_ids)
-            for build in builds:
-                if admin.json(build + "api/json")["building"]:
-                    admin.call(build + "stop", {}, expected=(200, 302, 303))
-                    e2e.poll(lambda: not admin.json(build + "api/json")["building"], seconds=60)
+            try:
+                settle_build(admin, job, second, rejected)
+            finally:
+                settle_build(admin, job, first, blocker)
         finally:
             current = head()
             if current is not None:

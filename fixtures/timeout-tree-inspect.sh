@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 test -s work/timeout-tree
+read -r started_at < work/timeout-start
+printf 'TIMEOUT_START %s\n' "$started_at"
 cat work/term-seen
 printf '\n'
 pid_state() {
@@ -38,3 +40,5 @@ for file in /proc/[0-9]*/stat; do
     fi
 done
 printf 'TIMEOUT_GROUP_STOPPED %s\n' "$target_group"
+read -r observed_at remainder < /proc/uptime
+printf 'TIMEOUT_OBSERVED %s\n' "$observed_at"
