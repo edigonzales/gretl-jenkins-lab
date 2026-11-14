@@ -134,6 +134,7 @@ def main():
     parser.add_argument("--port", type=int, default=18082)
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--standalone", action="store_true")
+    parser.add_argument("--ready-timeout", type=int, default=420)
     parser.add_argument("--restart", action="store_true")
     parser.add_argument("--large", action="store_true")
     parser.add_argument("--flows-only", action="store_true")
@@ -201,8 +202,10 @@ def main():
                 subprocess.run(["docker", "restart", "gretl-j4-standalone"], check=True, timeout=90)
             else:
                 kube("rollout", "restart", "statefulset/jenkins")
-                kube("rollout", "status", "statefulset/jenkins", "--timeout=150s", timeout=160)
-            poll(lambda: b"Proceed" in admin.call(flow + "input/Review/", expected=(200, 404))[0])
+                kube("rollout", "status", "statefulset/jenkins", f"--timeout={args.ready_timeout}s",
+                     timeout=args.ready_timeout + 10)
+            poll(lambda: b"Proceed" in admin.call(flow + "input/Review/", expected=(200, 404))[0],
+                 seconds=args.ready_timeout)
         reviewer.call(flow + "input/Review/proceed", form, expected=(200, 302, 303))
         flow_log = finish(admin, flow, "SUCCESS", evidence)
         revisions = re.findall(r"GRETL checkout-end \d+ ([a-f0-9]{40})", flow_log)
