@@ -69,6 +69,7 @@ def main():
 
     operator.call(endpoint, dev, expected=(403, 404))
     reviewer.call(endpoint, dev, expected=(403, 404))
+    assert admin.json(f"/job/{name}/api/json")["buildable"]
 
     deployed = (e2e.ROOT / "jenkins/j2-jobs-ref").read_text().strip()
     queue = operator.start("hello-gretl", {"message": "Stable catalog execution"})
@@ -95,7 +96,8 @@ def main():
     e2e.poll(lambda: b"Proceed" in admin.call(flow + "input/Review/", expected=(200, 404))[0])
     review = {"json": json.dumps({"parameter": [{"name": "publicationNote", "value": "Development review"}]}),
               "proceed": "Proceed"}
-    operator.call(flow + "input/Review/proceed", review, expected=(400, 403, 404))
+    denied, _ = operator.call(flow + "input/Review/proceed", review, expected=(400, 403, 404))
+    assert b"You need to be" in denied or b"Not Found" in denied
     reviewer.call(flow + "input/Review/proceed", review, expected=(200, 302, 303))
     log = e2e.finish(admin, flow, "SUCCESS", args.evidence)
     assert "J4 branch marker prepare" in log
