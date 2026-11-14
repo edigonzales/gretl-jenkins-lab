@@ -389,7 +389,7 @@ def render(d, catalog, url, revision, runtime, pipeline):
     # and the executable model above remain authoritative.
     console = dict(schemaVersion=2, id=d["id"], revision=revision, url=url, runtime=runtime,
                    parameters=list(d["parameters"].values()), schedule=d.get("schedule"),
-                   serial=d["execution"]["serial"], flow="steps" in d)
+                   serial=d["execution"]["serial"], flow="steps" in d, source=d.get("source"))
     metadata = base64.b64encode(json.dumps(console).encode()).decode()
     script = f"// GRETL-CONSOLE-V2 {metadata}\n" + script
     encoded = base64.b64encode(script.encode()).decode()

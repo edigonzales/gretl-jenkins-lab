@@ -2,8 +2,9 @@
 """Verify the Console against the installed plugin and existing k3d jobs."""
 import argparse
 import importlib.util
+import subprocess
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from playwright.sync_api import expect, sync_playwright
 
@@ -60,6 +61,33 @@ def main():
         expect(operator.get_by_text("H H(1-3) * * * · Europe/Zurich", exact=True)).to_be_visible()
         expect(operator.get_by_text("Seriell", exact=True)).to_be_visible()
 
+        branch = "feature/j2-jenkins-examples"
+        jobs = data.parent
+        expected = subprocess.check_output(
+            ["git", "-C", str(jobs), "ls-remote", "origin", "refs/heads/" + branch], text=True).split()[0]
+        deployed = (e2e.ROOT / "jenkins/j2-jobs-ref").read_text().strip()
+        preview = console + "hello-gretl/branchPreview"
+        viewer.get_by_label("Branchname").fill(branch)
+        viewer.get_by_role("button", name="Commit anzeigen").click()
+        expect(viewer.get_by_role("heading", name="Git-Branch-Vorschau")).to_be_visible()
+        expect(viewer.get_by_role("link", name=expected, exact=True)).to_have_attribute(
+            "href", f"https://github.com/edigonzales/gretl-runtime-jobs/commit/{expected}")
+        expect(viewer.get_by_role("link", name="Schema-V2-Datei an diesem Commit öffnen")).to_have_attribute(
+            "href", f"https://github.com/edigonzales/gretl-runtime-jobs/blob/{expected}/jobs/hello-gretl/job.yaml")
+        expect(viewer.get_by_text(deployed, exact=True).first).to_be_visible()
+        main = subprocess.check_output(
+            ["git", "-C", str(jobs), "ls-remote", "origin", "refs/heads/main"], text=True).split()[0]
+        viewer.goto(preview + "?branch=main")
+        expect(viewer.get_by_role("link", name=main, exact=True)).to_be_visible()
+        expect(viewer.get_by_text("Jobstarts verwenden weiterhin den bereitgestellten Commit.")).to_be_visible()
+        viewer.screenshot(path=evidence / "branch-preview.png")
+        viewer.goto(preview + "?" + urlencode({"branch": "j3-no-such-branch-0d79365"}))
+        expect(viewer.get_by_role("alert")).to_have_text("Branch im Job-Repository nicht gefunden.")
+        viewer.goto(preview + "?" + urlencode({"branch": "main~1"}))
+        expect(viewer.get_by_role("alert")).to_have_text("Ungültiger Git-Branchname.")
+        assert outsider.request.get(preview + "?branch=main").status == 404
+        assert browser.new_page().request.get(preview + "?branch=main").status == 403
+
         def start(job):
             route = f"/job/gretl-{job}/"
             previous = (admin.json(route + "api/json?tree=lastBuild[number]")["lastBuild"] or {}).get("number", 0)
@@ -83,7 +111,9 @@ def main():
         operator.get_by_label("Wiederholungen", exact=True).fill("2")
         operator.get_by_label("Grossbuchstaben", exact=True).check()
         build = start("hello-gretl")
-        assert e2e.finish(admin, build, "SUCCESS", evidence).count("GRÜEZI J3 phase=script") == 2
+        log = e2e.finish(admin, build, "SUCCESS", evidence)
+        assert log.count("GRÜEZI J3 phase=script") == 2
+        assert f"@{deployed} runtime" in log
 
         operator.goto(console + "csv-quality-check/")
         expect(operator.get_by_label("Stichtag")).to_have_attribute("type", "date")

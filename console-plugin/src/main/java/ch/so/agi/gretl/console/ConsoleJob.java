@@ -11,6 +11,8 @@ import hudson.model.Run;
 import hudson.model.StringParameterDefinition;
 import hudson.model.StringParameterValue;
 import hudson.model.TextParameterDefinition;
+import jakarta.servlet.ServletException;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import net.sf.json.JSONArray;
@@ -18,6 +20,10 @@ import net.sf.json.JSONObject;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.jenkinsci.plugins.workflow.support.steps.input.InputAction;
+import org.kohsuke.stapler.QueryParameter;
+import org.kohsuke.stapler.StaplerRequest2;
+import org.kohsuke.stapler.StaplerResponse2;
+import org.kohsuke.stapler.verb.GET;
 
 public final class ConsoleJob {
     private final WorkflowJob job;
@@ -50,6 +56,16 @@ public final class ConsoleJob {
 
     public String getRevisionUrl() {
         return metadata.getString("url").replaceFirst("\\.git$", "") + "/commit/" + getRevision();
+    }
+
+    @GET
+    public void doBranchPreview(StaplerRequest2 request, StaplerResponse2 response, @QueryParameter String branch)
+            throws IOException, ServletException {
+        job.checkPermission(Item.READ);
+        String repository = metadata.getString("url").replaceFirst("\\.git$", "");
+        BranchPreview preview = BranchPreview.resolve(repository, branch, getRevision(), metadata.optString("source"));
+        response.setHeader("Cache-Control", "no-store");
+        request.getView(preview, "index.jelly").forward(request, response);
     }
 
     public String getRuntime() {

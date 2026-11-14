@@ -130,9 +130,12 @@ Freigaben. Die Rollen und Zugangsdaten entsprechen J2.
 Der Generator schreibt die Anzeigemetadaten beim Deployment in die
 Jobdefinition. Die Formulare senden direkt an den nativen Jenkins-Build-Endpunkt.
 Dateien verarbeitet das File Parameter Plugin. Zeitpläne, Queue, Revision und
-Freigaben folgen der bereitgestellten J2-Konfiguration. Der Git-Link zeigt den
-bereitgestellten Commit. Ein anderer Ref wird durch den administrativen
-`JOBS_REF`-Deploymentpfad ausgewählt.
+Freigaben folgen der bereitgestellten J2-Konfiguration. Unter
+**Git-Branch-Vorschau** lässt sich der Name eines Branches im öffentlichen
+Job-Repository eingeben. Die Console zeigt dessen vollständigen Commit-SHA
+und verlinkt die Schema-V2-Datei an diesem Commit. Jeder Aufruf löst den Branch
+erneut auf. Für Jobstarts gilt der bereitgestellte Commit, den der
+Administrator über den J2-Deploymentpfad mit `JOBS_REF` festlegt.
 
 `install-console.sh` ersetzt das Plugin auf dem bestehenden PVC und startet
 den Jenkins-Controller neu. Das Browser-Skript nutzt die Playwright-Umgebung
