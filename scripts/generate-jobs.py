@@ -467,6 +467,7 @@ def main():
         return
     pipeline = (ROOT / "jenkins/gretl.Jenkinsfile").read_text()
     exposed = [d for d in catalog.values() if d.get("exposed", True)]
+    require(not any(id.startswith("dev-") for id in catalog), "catalog IDs beginning with dev- are reserved")
     names = ["gretl-" + d["id"] for d in exposed]
     scripts = [render(d, catalog, url, revision, args.runtime, pipeline, args.agent_label) for d in exposed]
     if args.dev_branches:
