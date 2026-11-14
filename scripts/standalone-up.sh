@@ -51,4 +51,10 @@ fi
 docker run -d --name "$name-agent" --network "$name" --restart unless-stopped \
   --cap-drop ALL --security-opt no-new-privileges --env-file .local/standalone/agent.env \
   --env "JENKINS_URL=http://$name:8080/" gretl-j4-agent:local >/dev/null
+expected=$(shasum -a 256 "$artifact" | cut -d' ' -f1)
+actual=$(docker exec "$name" sha256sum /var/jenkins_home/plugins/gretl-console.jpi | cut -d' ' -f1)
+if [[ $actual != "$expected" ]]; then
+    echo "The standalone controller did not install the supplied GRETL Console HPI" >&2
+    exit 1
+fi
 echo "GRETL Console http://127.0.0.1:$port/gretl-console/"
