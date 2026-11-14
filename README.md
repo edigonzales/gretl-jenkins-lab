@@ -173,6 +173,7 @@ mit demselben Schema-V2-Vertrag und setze dessen SHA als `TEST_COMMIT`.
 GitHub-Schreibrechte sind erforderlich.
 
 ```sh
+.local/j2-venv/bin/python scripts/test-j4-queue.py
 source scripts/env.sh
 .local/j2-venv/bin/python scripts/j4-queue.py --port 18082 \
   --jobs ../gretl-runtime-jobs --new-head "$TEST_COMMIT" \

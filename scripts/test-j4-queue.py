@@ -44,12 +44,57 @@ class QueueHandoffTest(unittest.TestCase):
                     call(BUILD_API), call(BUILD_API), call(BUILD_API), call(BUILD_API),
                 ])
 
-    def test_confirmed_cancel_finishes_without_looking_for_a_build(self):
+    def test_confirmed_cancel_checks_history(self):
         admin = Mock()
-        admin.json.return_value = {"blocked": True}
+        admin.json.side_effect = [{"blocked": True}, {"builds": []}]
         queue_test.settle_build(admin, JOB, QUEUE)
-        admin.json.assert_called_once_with(QUEUE + "api/json")
+        self.assertEqual(admin.json.call_args_list, [call(QUEUE + "api/json"), call(BUILDS_API)])
         admin.call.assert_called_once_with(CANCEL, {}, expected=(204,))
+
+    def test_history_404_after_cancel_is_retried_without_cancelling_again(self):
+        admin = Mock()
+        admin.json.side_effect = [
+            {"blocked": True},
+            queue_test.e2e.JenkinsError(BUILDS_API, 404, (200,)),
+            queue_test.e2e.JenkinsError(QUEUE, 404, (200,)),
+            {"builds": [{"queueId": 42, "url": BUILD}]},
+            {"building": True},
+            {"building": False},
+        ]
+        with patch.object(queue_test.e2e.time, "sleep"):
+            queue_test.settle_build(admin, JOB, QUEUE)
+        self.assertEqual(admin.call.call_args_list, [
+            call(CANCEL, {}, expected=(204,)),
+            call(BUILD + "stop", {}, expected=(200, 302, 303)),
+        ])
+
+    def test_executable_takes_precedence_when_queue_reports_cancelled(self):
+        admin = Mock()
+        admin.json.side_effect = [
+            {"cancelled": True, "executable": {"url": BUILD}},
+            {"building": True},
+            {"building": False},
+        ]
+        queue_test.settle_build(admin, JOB, QUEUE)
+        admin.call.assert_called_once_with(BUILD + "stop", {}, expected=(200, 302, 303))
+
+    def test_stops_known_build_without_queue_path(self):
+        admin = Mock()
+        admin.json.side_effect = [{"building": True}, {"building": False}]
+        queue_test.settle_build(admin, JOB, None, BUILD)
+        self.assertEqual(admin.json.call_args_list, [call(BUILD_API), call(BUILD_API)])
+        admin.call.assert_called_once_with(BUILD + "stop", {}, expected=(200, 302, 303))
+
+    def test_missing_queue_and_build_expires_with_diagnostic(self):
+        admin = Mock()
+        admin.json.side_effect = [
+            queue_test.e2e.JenkinsError(QUEUE, 404, (200,)),
+            {"builds": []},
+        ]
+        with patch.object(queue_test.e2e.time, "sleep"), patch.object(
+            queue_test.e2e.time, "monotonic", side_effect=[0, 1, 61]
+        ), self.assertRaisesRegex(TimeoutError, "Could not settle J4 queue item 42"):
+            queue_test.settle_build(admin, JOB, QUEUE)
 
 
 if __name__ == "__main__":

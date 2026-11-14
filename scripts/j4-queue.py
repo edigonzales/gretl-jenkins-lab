@@ -16,42 +16,47 @@ REMOTE = "https://github.com/edigonzales/gretl-runtime-jobs.git"
 
 
 def settle_build(admin, job, queue, build=None):
-    if queue is None:
+    # A known build comes from this queue item's executable, after promotion.
+    if queue is None and build is None:
         return
-    queue_id = int(queue.strip("/").split("/")[-1])
+    queue_id = int(queue.strip("/").split("/")[-1]) if queue else None
 
-    def find_build_or_cancel():
+    def read_if_visible(path):
         try:
-            item = admin.json(queue + "api/json")
+            return admin.json(path)
         except e2e.JenkinsError as error:
             if error.status != 404:
                 raise
-            item = {}
-        if item.get("cancelled"):
-            return (None,)
+            return None
+
+    cancelled = False
+
+    def find_build_or_cancel():
+        nonlocal cancelled
+        item = read_if_visible(queue + "api/json") or {}
         if executable := item.get("executable"):
             return (e2e.urlsplit(executable["url"]).path,)
-        if item:
+        cancelled = cancelled or item.get("cancelled", False)
+        if item and not cancelled:
             try:
                 admin.call(f"/queue/cancelItem?id={queue_id}", {}, expected=(204,))
-                return (None,)
+                cancelled = True
             except e2e.JenkinsError as error:
                 if error.status not in (404, 500):
                     raise
-        for run in admin.json(job + "api/json?tree=builds[queueId,url]")["builds"]:
-            if run.get("queueId") == queue_id:
-                return (e2e.urlsplit(run["url"]).path,)
+        history = read_if_visible(job + "api/json?tree=builds[queueId,url]")
+        if history is not None:
+            for run in history["builds"]:
+                if run.get("queueId") == queue_id:
+                    return (e2e.urlsplit(run["url"]).path,)
+            if cancelled:
+                return (None,)
         # A failed cancel and an absent build can both occur during promotion.
         # Wait for positive evidence of cancellation or the matching build.
         return None
 
     def build_state():
-        try:
-            return admin.json(build + "api/json?tree=building")
-        except e2e.JenkinsError as error:
-            if error.status != 404:
-                raise
-            return None
+        return read_if_visible(build + "api/json?tree=building")
 
     try:
         if build is None:

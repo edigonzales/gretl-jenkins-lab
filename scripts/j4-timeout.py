@@ -100,15 +100,17 @@ def main():
         ))
         term_elapsed = signaled_at - started_at
         elapsed = observed_at - started_at
-        assert 14 <= term_elapsed < 19, term_elapsed
-        assert 19 <= elapsed < 30, elapsed
+        # Allow /proc/uptime's centisecond resolution. The second limit covers
+        # the entire observation, including agent-side process inspection.
+        assert 14.98 <= term_elapsed < 19, term_elapsed
+        assert 19.98 <= elapsed < 30, elapsed
         if not args.standalone:
             agent = re.search(r"Running on (\S+) in ", log).group(1)
             e2e.poll(lambda: f"pod/{agent}" not in e2e.kube("get", "pods", "-o", "name").splitlines(),
                      seconds=150)
             print(f"Agent pod {agent} removed.", flush=True)
         print(f"{build} TERM after {term_elapsed:.1f}s, escalated to KILL. "
-              f"GRETL JVM, child and grandchild stopped on the same agent in {elapsed:.1f}s.",
+              f"Inspection confirmed no live process in the group at {elapsed:.1f}s.",
               flush=True)
     finally:
         admin.call(f"/job/{name}/doDelete", {}, expected=(302, 303, 404))
