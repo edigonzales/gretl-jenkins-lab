@@ -454,7 +454,8 @@ def main():
     parser.add_argument("--dev-branches", action="store_true", help="Provision admin-only developer jobs")
     parser.add_argument("--scripts", action="store_true", help="Print validated job script paths")
     args = parser.parse_args()
-    require(matches(args.agent_label, ID, 64), "invalid GRETL agent label")
+    require(matches(args.agent_label, ID, 64) and args.agent_label not in {"built-in", "master"},
+            "expected a dedicated GRETL agent label")
     revision = git(args.repository, "rev-parse", "--verify", "--end-of-options", args.ref + "^{commit}")
     url = git(args.repository, "remote", "get-url", "origin")
     require(re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", url),
