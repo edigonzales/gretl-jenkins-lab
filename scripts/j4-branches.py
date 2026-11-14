@@ -98,6 +98,7 @@ def main():
               "proceed": "Proceed"}
     denied, _ = operator.call(flow + "input/Review/proceed", review, expected=(400, 403, 404))
     assert b"You need to be" in denied or b"not found" in denied.lower()
+    assert b"Proceed" in reviewer.call(flow + "input/Review/")[0]
     reviewer.call(flow + "input/Review/proceed", review, expected=(200, 302, 303))
     log = e2e.finish(admin, flow, "SUCCESS", args.evidence)
     assert "J4 branch marker prepare" in log
