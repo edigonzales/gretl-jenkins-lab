@@ -438,7 +438,7 @@ def render(d, catalog, url, revision, runtime, pipeline, agent_label="gretl-j4",
         lines.append("  }")
     lines += ["  configure { project ->",
               "    if (jenkins.model.Jenkins.get().pluginManager.getPlugin('gretl-console')?.active) {",
-              f"      project / properties / 'ch.so.agi.gretl.console.ConsoleMetadata' {{ encoded('{metadata}') }}",
+              f"      project / 'properties' / 'ch.so.agi.gretl.console.ConsoleMetadata' {{ encoded('{metadata}') }}",
               "    }", "  }"]
     lines += ["  definition { cps {", f"    script(new String('{encoded}'.decodeBase64(), 'UTF-8'))",
               "    sandbox()", "  } }", "}"]
