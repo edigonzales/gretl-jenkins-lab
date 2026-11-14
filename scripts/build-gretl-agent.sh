@@ -9,6 +9,7 @@ docker run --rm --network none --entrypoint sh gretl-j4-agent:local -ec '
     java -version 2>&1 | grep "^openjdk version \"25\."
     test "$(id -u)" -ne 0
     git --version
+    timeout --kill-after=1s 2s true
     /opt/gretl/bin/gretl --version
 ' >&2
 printf '%s\n' gretl-j4-agent:local

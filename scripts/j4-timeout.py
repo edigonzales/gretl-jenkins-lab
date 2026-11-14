@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from urllib.request import Request
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -61,6 +62,16 @@ def main():
         assert "ACCEPTANCE_PROCESS_STARTED" in log
         assert "ACCEPTANCE_PROCESS_FINISHED" not in log
         assert "GRETL exceeded its execution limit" in log
+        start = re.search(r"\[([^\]]+)\] GRETL runtime-start", log).group(1)
+        cancelled = re.search(r"\[([^\]]+)\].*exec timeout", log).group(1)
+        started_at = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        invoked_at = datetime.fromisoformat(cancelled.replace("Z", "+00:00"))
+        assert 0 <= (invoked_at - started_at).total_seconds() < 10
+        result = admin.json(build + "api/json")
+        started = re.search(r"\[([^\]]+)\].*ACCEPTANCE_PROCESS_STARTED", log).group(1)
+        fixture_at = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        duration = (result["timestamp"] + result["duration"]) / 1000 - fixture_at.timestamp()
+        assert 0 < duration < 35, f"Timed-out fixture remained active for {duration:.1f}s"
         agent, workspace = re.search(r"Running on (\S+) in (\S+)", log).groups()
         if args.standalone:
             processes = subprocess.check_output(
@@ -70,6 +81,7 @@ def main():
                            for line in processes.splitlines()), "GRETL was still running after Jenkins timed out"
         else:
             e2e.poll(lambda: f"pod/{agent}" not in e2e.kube("get", "pods", "-o", "name").splitlines(), seconds=150)
+        print(f"GRETL stopped in {duration:.1f}s after the fixture started", flush=True)
     finally:
         admin.call(f"/job/{name}/doDelete", {}, expected=(302, 303, 404))
 
