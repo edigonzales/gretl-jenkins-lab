@@ -14,6 +14,8 @@ admin = e2e.Jenkins(int(sys.argv[1]), passwords["chart-admin-username"], passwor
 agent = "gretl-j4"
 def agent_config():
     body, _ = admin.call(f"/computer/{agent}/jenkins-agent.jnlp", expected=(200, 403, 404))
+    if b"Failed to initialize Jenkins" in body or b"Jenkins failed to load" in body:
+        raise RuntimeError("Standalone Jenkins failed to initialize")
     if not body.lstrip().startswith(b"<?xml") and not body.lstrip().startswith(b"<jnlp"):
         return None
     return ET.fromstring(body)
