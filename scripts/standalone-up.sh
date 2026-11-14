@@ -31,6 +31,7 @@ context_dir=$(mktemp -d .local/standalone-build.XXXXXX)
 trap 'rm -rf "$context_dir"' EXIT
 cp "$artifact" "$context_dir/gretl-console.hpi"
 cp .local/standalone/{config,jobs}.yaml "$context_dir/"
+chmod 644 "$context_dir"/{config,jobs}.yaml
 # Use the same direct J2 plugin versions as the Helm installation, with no Kubernetes plugin.
 {
     printf '%s\n' workflow-aggregator:608.v67378e9d3db_1 git:5.11.0 configuration-as-code:2147.v8a_8d38668c72
