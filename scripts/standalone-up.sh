@@ -16,7 +16,7 @@ fi
 mkdir -p .local/standalone
 ./scripts/deploy-jobs.sh standalone
 python=${GRETL_J2_PYTHON:-.local/j2-venv/bin/python}
-"$python" scripts/render-casc.py standalone gretl-j4-agent:local > .local/standalone/config.yaml
+"$python" scripts/render-casc.py standalone --label "${GRETL_AGENT_LABEL:-gretl-j4}" > .local/standalone/config.yaml
 if [[ ! -s .local/standalone/users.env ]]; then
     "$python" - <<'PY' > .local/standalone/users.env
 import secrets

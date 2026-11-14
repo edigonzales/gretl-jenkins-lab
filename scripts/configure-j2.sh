@@ -15,7 +15,7 @@ print(json.dumps(dict(apiVersion='v1', kind='Secret', metadata={'name': 'jenkins
                       stringData={u: secrets.token_urlsafe(24) for u in users})))
 PY
 fi
-"$python" scripts/render-casc.py k3d "$image" > .local/j2-casc.yaml
+"$python" scripts/render-casc.py k3d "$image" --label "${GRETL_AGENT_LABEL:-gretl-j4}" > .local/j2-casc.yaml
 install_config=$(shasum -a 256 .local/j2-casc.yaml jenkins/values.yaml jenkins/j2-values.yaml scripts/install-jenkins.sh)
 # The first install adds plugins. Later deployments only change the Job DSL ConfigMap.
 if jenkins get cm jenkins-jenkins-config-gretl >/dev/null 2>&1 &&

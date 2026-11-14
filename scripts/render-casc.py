@@ -7,7 +7,8 @@ import yaml
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("platform", choices=["k3d", "standalone"])
-parser.add_argument("image")
+parser.add_argument("image", nargs="?")
+parser.add_argument("--label", default="gretl-j4")
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
 config = yaml.safe_load((root / "jenkins/casc.yaml").read_text())
@@ -23,20 +24,25 @@ for user in ("operator", "reviewer", "viewer", "outsider", "dual-role"):
 if args.platform == "standalone":
     del jenkins["clouds"]
     agent = jenkins["nodes"][0]["permanent"]
-    agent.update(name="gretl-j4", labelString="gretl-j4", remoteFS="/work/agent")
+    agent.update(name="gretl-j4", labelString=args.label, remoteFS="/work/agent")
 else:
+    if not args.image:
+        parser.error("the k3d agent image is required")
     templates = jenkins["clouds"][0]["kubernetes"]["templates"]
     templates.append({
-        "name": "gretl-j4", "label": "gretl-j4", "nodeUsageMode": "EXCLUSIVE",
+        "name": "gretl-j4", "label": args.label, "nodeUsageMode": "EXCLUSIVE",
         "instanceCap": 2, "idleMinutes": 0, "agentContainer": "gretl", "agentInjection": True,
         "yaml": yaml.safe_dump({
             "apiVersion": "v1", "kind": "Pod",
             "spec": {
                 "automountServiceAccountToken": False,
-                "securityContext": {"runAsUser": 1000, "runAsGroup": 0, "fsGroup": 0},
+                "restartPolicy": "Never",
+                "securityContext": {"runAsNonRoot": True, "runAsGroup": 0, "fsGroup": 0,
+                                    "seccompProfile": {"type": "RuntimeDefault"}},
                 "containers": [{
                     "name": "gretl", "image": args.image, "imagePullPolicy": "Never",
                     "workingDir": "/work/agent",
+                    "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}},
                     "resources": {
                         "requests": {"cpu": "200m", "memory": "512Mi"},
                         "limits": {"cpu": "1", "memory": "3584Mi"},
