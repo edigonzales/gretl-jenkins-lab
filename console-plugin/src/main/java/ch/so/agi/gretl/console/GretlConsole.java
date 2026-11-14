@@ -13,12 +13,10 @@ import jenkins.model.Jenkins;
 import jenkins.security.stapler.StaplerDispatchable;
 import net.sf.json.JSONException;
 import net.sf.json.JSONObject;
-import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 
 @Extension
 public final class GretlConsole implements RootAction {
-    private static final String MARKER = "// GRETL-CONSOLE-V2 ";
     private static final Pattern ID = Pattern.compile("[a-z0-9]+(?:-[a-z0-9]+)*");
     private static final Pattern REPOSITORY =
             Pattern.compile("https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+");
@@ -64,17 +62,16 @@ public final class GretlConsole implements RootAction {
     }
 
     private static Optional<ConsoleJob> entry(WorkflowJob job) {
-        if (job.isDisabled() || !job.hasPermission(Item.READ) || !(job.getDefinition() instanceof CpsFlowDefinition definition)) {
+        if (job.isDisabled() || !job.hasPermission(Item.READ)) {
             return Optional.empty();
         }
-        String script = definition.getScript();
-        int newline = script.indexOf('\n');
-        if (!script.startsWith(MARKER) || newline < MARKER.length() || newline > 128 * 1024) {
+        ConsoleMetadata property = job.getProperty(ConsoleMetadata.class);
+        String encoded = property == null ? null : property.encoded();
+        if (encoded == null || encoded.length() > 128 * 1024) {
             return Optional.empty();
         }
         try {
-            String json = new String(Base64.getDecoder().decode(script.substring(MARKER.length(), newline).strip()),
-                    StandardCharsets.UTF_8);
+            String json = new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
             JSONObject metadata = JSONObject.fromObject(json);
             String id = metadata.optString("id", "");
             if (metadata.optInt("schemaVersion") == 2 && validId(id)

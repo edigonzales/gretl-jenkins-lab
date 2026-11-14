@@ -391,7 +391,6 @@ def render(d, catalog, url, revision, runtime, pipeline):
                    parameters=list(d["parameters"].values()), schedule=d.get("schedule"),
                    serial=d["execution"]["serial"], flow="steps" in d, source=d.get("source"))
     metadata = base64.b64encode(json.dumps(console).encode()).decode()
-    script = f"// GRETL-CONSOLE-V2 {metadata}\n" + script
     encoded = base64.b64encode(script.encode()).decode()
     lines = [f"pipelineJob({literal('gretl-' + d['id'])}) {{", f"  displayName({literal(d['name'])})",
              f"  description({literal(d['description'])})", "  disabled(false)"]
@@ -412,6 +411,9 @@ def render(d, catalog, url, revision, runtime, pipeline):
             cron = "TZ=" + schedule["timeZone"] + "\n" + schedule["cron"]
             lines += ["    pipelineTriggers { triggers { cron { spec(" + literal(cron) + ") } } }"]
         lines.append("  }")
+    lines += ["  configure { project ->",
+              f"    project / properties / 'ch.so.agi.gretl.console.ConsoleMetadata' {{ encoded('{metadata}') }}",
+              "  }"]
     lines += ["  definition { cps {", f"    script(new String('{encoded}'.decodeBase64(), 'UTF-8'))",
               "    sandbox()", "  } }", "}"]
     return "\n".join(lines)
