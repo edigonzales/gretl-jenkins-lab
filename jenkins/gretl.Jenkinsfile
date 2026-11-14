@@ -221,16 +221,24 @@ def runJob(model, step, inputs, uploads, approvals, artifacts) {
             }
             try {
                 withEnv(["GRETL_SCRIPT=source/${scriptPath}", "HOME=${workspace}/work",
+                         "GRETL_TIMEOUT=${job.execution.timeoutSeconds}",
                          "JAVA_TOOL_OPTIONS=-Duser.home=${workspace}/work -Djava.io.tmpdir=/tmp"]) {
                     echo "GRETL runtime-start ${System.currentTimeMillis()}"
-                    timeout(time: job.execution.timeoutSeconds, unit: 'SECONDS') {
-                        sh '''
+                    // Bound the shutdown even if GRETL's JVM is still handling TERM.
+                    def status = timeout(time: job.execution.timeoutSeconds + 15, unit: 'SECONDS') {
+                        sh(returnStatus: true, script: '''
                             set -eu
                             java -version
-                            exec /opt/gretl/bin/gretl run "$GRETL_SCRIPT" --params-file "$PWD/parameters.json" \
-                              --config "$PWD/runtime.json" --work-dir "$PWD/work" --report "$PWD/reports/run.json"
-                        '''
+                            exec timeout --kill-after=5s "$GRETL_TIMEOUT" /opt/gretl/bin/gretl run "$GRETL_SCRIPT" \
+                              --params-file "$PWD/parameters.json" --config "$PWD/runtime.json" \
+                              --work-dir "$PWD/work" --report "$PWD/reports/run.json"
+                        ''')
                     }
+                    if (status == 124 || status == 137) {
+                        currentBuild.result = 'ABORTED'
+                        error("GRETL exceeded its execution limit or was terminated (exit ${status})")
+                    }
+                    if (status != 0) error("GRETL exited with status ${status}")
                 }
             } finally {
                 if (fileExists('reports/run.json')) {

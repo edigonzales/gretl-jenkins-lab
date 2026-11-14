@@ -60,7 +60,7 @@ def main():
         log = e2e.finish(admin, build, "ABORTED", args.evidence)
         assert "ACCEPTANCE_PROCESS_STARTED" in log
         assert "ACCEPTANCE_PROCESS_FINISHED" not in log
-        assert "Cancelling nested steps due to timeout" in log
+        assert "GRETL exceeded its execution limit" in log
         agent, workspace = re.search(r"Running on (\S+) in (\S+)", log).groups()
         if args.standalone:
             processes = subprocess.check_output(
