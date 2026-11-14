@@ -401,7 +401,6 @@ def render(d, catalog, url, revision, runtime, pipeline, agent_label="gretl-j4",
         console["developer"] = True
         console["schedule"] = None
     metadata = base64.b64encode(json.dumps(console).encode()).decode()
-    script = f"// GRETL-CONSOLE-V2 {metadata}\n" + script
     encoded = base64.b64encode(script.encode()).decode()
     name = ("gretl-dev-" if developer else "gretl-") + d["id"]
     title = d["name"] + (" (Entwicklung)" if developer else "")
@@ -432,6 +431,9 @@ def render(d, catalog, url, revision, runtime, pipeline, agent_label="gretl-j4",
             cron = "TZ=" + schedule["timeZone"] + "\n" + schedule["cron"]
             lines += ["    pipelineTriggers { triggers { cron { spec(" + literal(cron) + ") } } }"]
         lines.append("  }")
+    lines += ["  configure { project ->",
+              f"    project / properties / 'ch.so.agi.gretl.console.ConsoleMetadata' {{ encoded('{metadata}') }}",
+              "  }"]
     lines += ["  definition { cps {", f"    script(new String('{encoded}'.decodeBase64(), 'UTF-8'))",
               "    sandbox()", "  } }", "}"]
     return "\n".join(lines)
