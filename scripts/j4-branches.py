@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+from urllib.parse import urlencode
 
 from playwright.sync_api import expect, sync_playwright
 
@@ -39,7 +40,7 @@ def main():
     branch_sha = revision(args.branch)
     endpoint = f"/job/{name}/buildWithParameters"
     dev = {"GRETL_DEV_BRANCH": args.branch, "GRETL_DEV_SHA": branch_sha, "J2_message": "J4 branch suite"}
-    preview = f"{admin.base}/gretl-console/hello-gretl/branchPreview?branch={args.branch}"
+    preview = f"{admin.base}/gretl-console/hello-gretl/branchPreview?" + urlencode({"branch": args.branch})
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         page = browser.new_page()
@@ -67,6 +68,13 @@ def main():
         page.screenshot(path=args.evidence / "development-run.png")
 
     operator.call(endpoint, dev, expected=(403, 404))
+    reviewer.call(endpoint, dev, expected=(403, 404))
+
+    deployed = (e2e.ROOT / "jenkins/j2-jobs-ref").read_text().strip()
+    queue = operator.start("hello-gretl", {"message": "Stable catalog execution"})
+    normal = e2e.queued_build(admin, queue)
+    normal_log = e2e.finish(admin, normal, "SUCCESS", args.evidence)
+    assert f"@{deployed} runtime" in normal_log and "J4 branch marker" not in normal_log
 
     def start(target, form, result, upload=None):
         _, headers = admin.call(f"/job/gretl-dev-{target}/buildWithParameters", form, upload, expected=(201,))
