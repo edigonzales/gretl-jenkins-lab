@@ -412,7 +412,7 @@ def render(d, catalog, url, revision, runtime, pipeline):
             lines += ["    pipelineTriggers { triggers { cron { spec(" + literal(cron) + ") } } }"]
         lines.append("  }")
     lines += ["  configure { project ->",
-              f"    project / properties / 'ch.so.agi.gretl.console.ConsoleMetadata' {{ encoded('{metadata}') }}",
+              f"    project / 'properties' / 'ch.so.agi.gretl.console.ConsoleMetadata' {{ encoded('{metadata}') }}",
               "  }"]
     lines += ["  definition { cps {", f"    script(new String('{encoded}'.decodeBase64(), 'UTF-8'))",
               "    sandbox()", "  } }", "}"]
