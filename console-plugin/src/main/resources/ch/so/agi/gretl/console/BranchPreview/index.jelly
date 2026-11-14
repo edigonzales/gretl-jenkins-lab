@@ -1,0 +1,29 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+  <l:layout title="Git-Branch-Vorschau · GRETL Console">
+    <l:header><link rel="stylesheet" href="${rootURL}/plugin/gretl-console/css/console.css"/></l:header>
+    <l:main-panel>
+      <div class="gretl-console">
+        <div class="gretl-heading">
+          <h1>Git-Branch-Vorschau</h1>
+          <a class="jenkins-button" href="./">Zurück zum Job</a>
+        </div>
+        <j:choose>
+          <j:when test="${not empty(it.error)}"><p role="alert">${it.error}</p></j:when>
+          <j:otherwise>
+            <dl class="gretl-details">
+              <dt>Branch</dt><dd><code>${it.branch}</code></dd>
+              <dt>Commit der Vorschau</dt><dd><a href="${it.commitUrl}"><code>${it.commit}</code></a></dd>
+              <dt>Bereitgestellter Commit</dt><dd><code>${it.deployed}</code></dd>
+            </dl>
+            <j:choose>
+              <j:when test="${it.current}"><p>Die Vorschau entspricht dem bereitgestellten Commit.</p></j:when>
+              <j:otherwise><p>Jobstarts verwenden weiterhin den bereitgestellten Commit.</p></j:otherwise>
+            </j:choose>
+            <j:if test="${not empty(it.sourceUrl)}"><a href="${it.sourceUrl}">Schema-V2-Datei an diesem Commit öffnen</a></j:if>
+          </j:otherwise>
+        </j:choose>
+      </div>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

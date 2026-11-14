@@ -1,0 +1,137 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:f="/lib/form" xmlns:st="jelly:stapler">
+  <l:layout title="${it.title} · GRETL Console">
+    <l:header>
+      <link rel="stylesheet" href="${rootURL}/plugin/gretl-console/css/console.css"/>
+    </l:header>
+    <l:breadcrumb title="GRETL Console" href="${rootURL}/gretl-console/"/>
+    <l:breadcrumb title="${it.title}" href="${rootURL}/gretl-console/${it.id}/"/>
+    <l:main-panel>
+      <div class="gretl-console">
+        <div class="gretl-heading">
+          <h1>${it.title}</h1>
+          <a class="jenkins-button" href="${rootURL}/${it.jobUrl}">In Jenkins öffnen</a>
+        </div>
+        <p>${it.description}</p>
+        <dl class="gretl-details">
+          <dt>Git-Revision</dt><dd><a href="${it.revisionUrl}"><code>${it.revision}</code></a></dd>
+          <dt>Runtime-Image</dt><dd><code>${it.runtime}</code></dd>
+          <j:if test="${not empty(it.schedule)}"><dt>Zeitplan</dt><dd>${it.schedule}</dd></j:if>
+          <j:if test="${it.serial}"><dt>Ausführung</dt><dd>Seriell</dd></j:if>
+        </dl>
+        <section class="gretl-section">
+          <h2>Git-Branch-Vorschau</h2>
+          <form method="get" action="branchPreview" class="gretl-branch-form">
+            <label for="gretl-branch">Branchname</label>
+            <input class="jenkins-input" id="gretl-branch" name="branch" type="text" maxlength="255"
+                   placeholder="main" required="required" spellcheck="false"/>
+            <button class="jenkins-button" type="submit">Commit anzeigen</button>
+          </form>
+        </section>
+        <j:if test="${it.canBuild}">
+          <section class="gretl-section">
+            <h2>Ausführung starten</h2>
+            <f:form method="post" action="${rootURL}/${it.jobUrl}build" name="parameters" class="jenkins-form">
+              <j:forEach var="field" items="${it.fields}">
+                <j:set var="parameter" value="${field.definition}"/>
+                <j:choose>
+                  <j:when test="${field.type == 'date' or field.type == 'integer' or field.type == 'enum'}">
+                    <div class="gretl-field">
+                      <label for="${parameter.name}">${field.label}</label>
+                      <div name="parameter">
+                        <input type="hidden" name="name" value="${parameter.name}"/>
+                        <j:choose>
+                          <j:when test="${field.type == 'enum'}">
+                            <div class="jenkins-select">
+                              <select id="${parameter.name}" class="jenkins-select__input" name="value">
+                                <j:forEach var="choice" items="${field.choices}">
+                                  <f:option value="${choice.value}" selected="${choice.selected}">${choice.label}</f:option>
+                                </j:forEach>
+                              </select>
+                            </div>
+                          </j:when>
+                          <j:when test="${field.type == 'date'}">
+                            <input class="jenkins-input" id="${parameter.name}" type="date" required="${field.required ? 'required' : null}" name="value" value="${field.defaultValue}"/>
+                          </j:when>
+                          <j:otherwise>
+                            <input class="jenkins-input" id="${parameter.name}" type="number" required="${field.required ? 'required' : null}" step="1"
+                                   min="-2147483648" max="2147483647" name="value" value="${field.defaultValue}"/>
+                          </j:otherwise>
+                        </j:choose>
+                      </div>
+                    </div>
+                  </j:when>
+                  <j:when test="${field.type == 'text' or field.type == 'multiline' or field.type == 'boolean' or field.type == 'file'}">
+                    <div class="gretl-field">
+                      <label for="${parameter.name}">${field.label}</label>
+                      <div name="parameter">
+                        <input type="hidden" name="name" value="${parameter.name}"/>
+                        <j:choose>
+                          <j:when test="${field.type == 'multiline'}">
+                            <textarea class="jenkins-input" id="${parameter.name}" name="value" rows="4" maxlength="4096" required="${field.required ? 'required' : null}">${field.defaultValue}</textarea>
+                          </j:when>
+                          <j:when test="${field.type == 'boolean'}">
+                            <input id="${parameter.name}" type="checkbox" name="value" checked="${parameter.defaultParameterValue.value ? 'checked' : null}"/>
+                          </j:when>
+                          <j:when test="${field.type == 'file'}">
+                            <input id="${parameter.name}" type="file" required="${field.required ? 'required' : null}" name="file" class="jenkins-file-upload" jsonAware="true" accept="${field.accept}"/>
+                          </j:when>
+                          <j:otherwise>
+                            <input class="jenkins-input" id="${parameter.name}" type="text" required="${field.required ? 'required' : null}" name="value" value="${field.defaultValue}" maxlength="4096"/>
+                          </j:otherwise>
+                        </j:choose>
+                      </div>
+                    </div>
+                  </j:when>
+                  <j:otherwise>
+                    <j:set var="escapeEntryTitleAndDescription" value="true"/>
+                    <st:include it="${parameter}" page="${parameter.descriptor.valuePage}"/>
+                  </j:otherwise>
+                </j:choose>
+              </j:forEach>
+              <input type="hidden" name="statusCode" value="303"/>
+              <input type="hidden" name="redirectTo" value="${rootURL}/gretl-console/${it.id}/"/>
+              <button class="jenkins-button jenkins-button--primary" type="submit">
+                <l:icon src="symbol-play"/> Starten
+              </button>
+            </f:form>
+          </section>
+        </j:if>
+        <section class="gretl-section">
+          <div class="gretl-heading">
+            <h2>Ausführungen</h2>
+            <a class="jenkins-button" href="${rootURL}/gretl-console/${it.id}/">Aktualisieren</a>
+          </div>
+          <j:if test="${it.queued}"><p>Ein Build wartet in der Jenkins-Warteschlange.</p></j:if>
+          <j:set var="builds" value="${it.builds}"/>
+          <j:choose>
+            <j:when test="${empty(builds)}"><p>Noch keine Ausführung.</p></j:when>
+            <j:otherwise>
+              <div class="gretl-table">
+                <table class="jenkins-table">
+                  <thead><tr><th>Build</th><th>Status</th><th>Startzeit (UTC)</th><th>Ergebnisse</th></tr></thead>
+                  <tbody>
+                    <j:forEach var="build" items="${builds}">
+                      <tr>
+                        <td><a href="${rootURL}/${build.url}">#${build.number}</a></td>
+                        <td><j:choose>
+                          <j:when test="${build.waiting}"><a href="${rootURL}/${build.url}input/">${build.status}</a></j:when>
+                          <j:otherwise>${build.status}</j:otherwise>
+                        </j:choose></td>
+                        <td>${build.age}</td>
+                        <td>
+                          <j:if test="${build.artifacts}"><a href="${rootURL}/${build.url}artifact/">Artefakte</a> · </j:if>
+                          <a href="${rootURL}/${build.url}console">Log</a>
+                        </td>
+                      </tr>
+                    </j:forEach>
+                  </tbody>
+                </table>
+              </div>
+            </j:otherwise>
+          </j:choose>
+        </section>
+      </div>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

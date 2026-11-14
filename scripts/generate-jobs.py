@@ -385,6 +385,12 @@ def render(d, catalog, url, revision, runtime, pipeline):
     require(pipeline.count("'@MODEL@'") == 1, "expected one pipeline model placeholder")
     payload = json.dumps(model, ensure_ascii=True)
     script = pipeline.replace("'@MODEL@'", literal(payload), 1)
+    # Read-only presentation metadata for the Console. Jenkins job configuration
+    # and the executable model above remain authoritative.
+    console = dict(schemaVersion=2, id=d["id"], revision=revision, url=url, runtime=runtime,
+                   parameters=list(d["parameters"].values()), schedule=d.get("schedule"),
+                   serial=d["execution"]["serial"], flow="steps" in d, source=d.get("source"))
+    metadata = base64.b64encode(json.dumps(console).encode()).decode()
     encoded = base64.b64encode(script.encode()).decode()
     lines = [f"pipelineJob({literal('gretl-' + d['id'])}) {{", f"  displayName({literal(d['name'])})",
              f"  description({literal(d['description'])})", "  disabled(false)"]
@@ -405,6 +411,9 @@ def render(d, catalog, url, revision, runtime, pipeline):
             cron = "TZ=" + schedule["timeZone"] + "\n" + schedule["cron"]
             lines += ["    pipelineTriggers { triggers { cron { spec(" + literal(cron) + ") } } }"]
         lines.append("  }")
+    lines += ["  configure { project ->",
+              f"    project / 'properties' / 'ch.so.agi.gretl.console.ConsoleMetadata' {{ encoded('{metadata}') }}",
+              "  }"]
     lines += ["  definition { cps {", f"    script(new String('{encoded}'.decodeBase64(), 'UTF-8'))",
               "    sandbox()", "  } }", "}"]
     return "\n".join(lines)
