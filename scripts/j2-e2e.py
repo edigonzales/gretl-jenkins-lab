@@ -93,7 +93,13 @@ def poll(check, seconds=180):
 
 
 def queued_build(client, queue):
-    return poll(lambda: urlsplit(client.json(queue + "api/json").get("executable", {}).get("url", "")).path)
+    def executable():
+        item = client.json(queue + "api/json")
+        if item.get("cancelled"):
+            raise RuntimeError(f"Jenkins cancelled queue item {queue}")
+        return urlsplit((item.get("executable") or {}).get("url", "")).path
+
+    return poll(executable)
 
 
 def credentials():
