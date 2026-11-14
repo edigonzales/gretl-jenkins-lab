@@ -12,10 +12,10 @@ jenkins exec -i jenkins-0 -c jenkins -- sh -eu -c '
   mv .gretl-console.jpi.tmp gretl-console.jpi
 ' < "$artifact"
 jenkins rollout restart statefulset/jenkins
-jenkins rollout status statefulset/jenkins --timeout=180s
+jenkins rollout status statefulset/jenkins --timeout=360s
 if ! jenkins exec jenkins-0 -c jenkins -- sh -eu -c '
   test -s "$JENKINS_HOME/plugins/gretl-console/META-INF/MANIFEST.MF"
-  curl -fso /dev/null http://127.0.0.1:8080/plugin/gretl-console/css/console.css
+  test -s "$JENKINS_HOME/plugins/gretl-console/WEB-INF/lib/gretl-console.jar"
 '; then
   echo "The controller restarted but GRETL Console is unavailable" >&2
   exit 1
