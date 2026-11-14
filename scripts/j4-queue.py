@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Move a real Git branch while a developer build is blocked in Jenkins."""
 import argparse
+import hashlib
 import importlib.util
 import json
 import re
@@ -55,10 +56,13 @@ def main():
         reason = item.get("why") or ""
         return reason if item["blocked"] and f"Build #{build.strip('/').split('/')[-1]}" in reason else None
 
-    current = old
+    def checkouts(log):
+        return re.findall(r"GRETL checkout-end (\d+) ([a-f0-9]{40})", log)
+
     first = second = None
-    git("push", "--force-with-lease=" + ref + ":", REMOTE, old + ":" + ref)
+    assert head() is None
     try:
+        git("push", "--force-with-lease=" + ref + ":", REMOTE, old + ":" + ref)
         assert head() == old
         first = enqueue("queue-blocker.csv")
         blocker = e2e.queued_build(admin, first)
@@ -66,20 +70,27 @@ def main():
         second = enqueue("queued-branch.csv")
         before = e2e.poll(lambda: blocked_by(second, blocker))
         git("push", f"--force-with-lease={ref}:{old}", REMOTE, new + ":" + ref)
-        current = new
         assert head() == new
         after = blocked_by(second, blocker)
         assert after, "The build must still be blocked after GitHub reports the new head"
+        assert b"Proceed" in reviewer.call(blocker + "input/Review/")[0]
+        before_approval = checkouts(admin.call(blocker + "consoleText")[0].decode())
+        assert [sha for _, sha in before_approval] == [old], before_approval
         record = {"branch": branch, "oldHead": old, "newHead": new, "blocker": blocker,
-                  "queueItem": second, "blockedBeforePush": before, "blockedAfterPush": after}
+                  "queueItem": second, "blockedBeforePush": before, "blockedAfterPush": after,
+                  "checkoutsBeforeApproval": before_approval}
         (args.evidence / "queue-transition.json").write_text(json.dumps(record, indent=2) + "\n")
 
         review = {"json": json.dumps({"parameter": [{"name": "publicationNote", "value": "J4 queue test"}]}),
                   "proceed": "Proceed"}
         reviewer.call(blocker + "input/Review/proceed", review, expected=(200, 302, 303))
         log = e2e.finish(admin, blocker, "SUCCESS", args.evidence)
-        assert re.findall(r"GRETL checkout-end \d+ ([a-f0-9]{40})", log) == [old, old]
-        assert admin.call(blocker + "artifact/publish/published.csv")[0] == publication
+        completed = checkouts(log)
+        assert completed[:1] == before_approval and len(completed) == 2 and completed[1][1] == old, completed
+        published = admin.call(blocker + "artifact/publish/published.csv")[0]
+        assert published == publication
+        record["checkoutsAfterApproval"] = completed
+        record["publishedSha256"] = hashlib.sha256(published).hexdigest()
 
         rejected = e2e.queued_build(admin, second)
         log = e2e.finish(admin, rejected, "FAILURE", args.evidence)
@@ -89,7 +100,7 @@ def main():
                   if param["name"] in {"GRETL_DEV_BRANCH", "GRETL_DEV_SHA"}}
         assert params["GRETL_DEV_BRANCH"] == branch and params["GRETL_DEV_SHA"] == old
         assert "The branch head changed. Select the branch again." in log
-        assert "GRETL runtime-start" not in log and "GRETL checkout-end" not in log
+        assert "GRETL runtime-start" not in log and "GRETL checkout-start" not in log
         record["rejectedBuild"] = rejected
         record["rejectedParameters"] = params
         (args.evidence / "queue-transition.json").write_text(json.dumps(record, indent=2) + "\n")
@@ -112,7 +123,11 @@ def main():
                     admin.call("/queue/cancelItem?id=" + queue.strip("/").split("/")[-1], {},
                                expected=(200, 204, 302, 303, 404))
         finally:
-            git("push", f"--force-with-lease={ref}:{current}", REMOTE, ":" + ref)
+            current = head()
+            if current is not None:
+                assert current in {old, new}, f"Temporary ref {ref} unexpectedly points to {current}"
+                git("push", f"--force-with-lease={ref}:{current}", REMOTE, ":" + ref)
+                assert head() is None
 
 
 if __name__ == "__main__":
