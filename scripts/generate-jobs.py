@@ -432,8 +432,9 @@ def render(d, catalog, url, revision, runtime, pipeline, agent_label="gretl-j4",
             lines += ["    pipelineTriggers { triggers { cron { spec(" + literal(cron) + ") } } }"]
         lines.append("  }")
     lines += ["  configure { project ->",
-              f"    project / properties / 'ch.so.agi.gretl.console.ConsoleMetadata' {{ encoded('{metadata}') }}",
-              "  }"]
+              "    if (jenkins.model.Jenkins.get().pluginManager.getPlugin('gretl-console')?.active) {",
+              f"      project / properties / 'ch.so.agi.gretl.console.ConsoleMetadata' {{ encoded('{metadata}') }}",
+              "    }", "  }"]
     lines += ["  definition { cps {", f"    script(new String('{encoded}'.decodeBase64(), 'UTF-8'))",
               "    sandbox()", "  } }", "}"]
     return "\n".join(lines)
