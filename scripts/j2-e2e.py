@@ -4,6 +4,8 @@ import argparse
 import base64
 import http.cookiejar
 import json
+import os
+import subprocess
 from pathlib import Path
 import re
 import time
@@ -102,7 +104,12 @@ def queued_build(client, queue):
     return poll(executable)
 
 
-def credentials():
+def credentials(standalone=False):
+    if standalone:
+        values = dict(line.split("=", 1) for line in (ROOT / ".local/standalone/users.env").read_text().splitlines())
+        return {values["chart-admin-username"]: values["chart-admin-password"],
+                **{key.removeprefix("jenkins-j2-users-"): value
+                   for key, value in values.items() if key.startswith("jenkins-j2-users-")}}
     admin = json.loads(kube("get", "secret", "jenkins", "-o", "json"))["data"]
     local = json.loads(kube("get", "secret", "jenkins-j2-users", "-o", "json"))["data"]
     decode = lambda value: base64.b64decode(value).decode()
@@ -126,6 +133,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=18082)
     parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--standalone", action="store_true")
     parser.add_argument("--restart", action="store_true")
     parser.add_argument("--large", action="store_true")
     parser.add_argument("--flows-only", action="store_true")
@@ -134,15 +142,17 @@ def main():
     args = parser.parse_args()
     evidence = args.evidence
     evidence.mkdir(parents=True, exist_ok=True)
-    users = {name: Jenkins(args.port, name, password) for name, password in credentials().items()}
+    users = {name: Jenkins(args.port, name, password) for name, password in credentials(args.standalone).items()}
     admin, operator, reviewer, viewer, outsider, dual = (users[u] for u in
         ("admin", "operator", "reviewer", "viewer", "outsider", "dual-role"))
-    data = ROOT.parent / "gretl-runtime-jobs/testdata"
+    data = Path(os.environ.get("JOBS_REPOSITORY", ROOT.parent / "gretl-runtime-jobs")) / "testdata"
     sample = (data / "sample.csv").read_bytes()
     publication = (data / "publication.csv").read_bytes()
 
-    assert {"bench", "gretl-hello-gretl", "gretl-csv-analyzer", "gretl-scheduled-report",
-            "gretl-csv-publication"} <= {j["name"] for j in admin.json("/api/json?tree=jobs[name]")["jobs"]}
+    expected_jobs = {"gretl-hello-gretl", "gretl-csv-analyzer", "gretl-scheduled-report", "gretl-csv-publication"}
+    if not args.standalone:
+        expected_jobs.add("bench")
+    assert expected_jobs <= {j["name"] for j in admin.json("/api/json?tree=jobs[name]")["jobs"]}
     viewer.call("/job/gretl-hello-gretl/buildWithParameters", {}, expected=(403,))
     outsider.call("/job/gretl-hello-gretl/api/json", expected=(404,))
     operator.call("/job/gretl-publish-csv/api/json", expected=(404,))
@@ -187,8 +197,11 @@ def main():
         denied, _ = operator.call(flow + "input/Review/proceed", form, expected=(400, 403))
         assert b"You need to be" in denied
         if args.restart:
-            kube("rollout", "restart", "statefulset/jenkins")
-            kube("rollout", "status", "statefulset/jenkins", "--timeout=150s", timeout=160)
+            if args.standalone:
+                subprocess.run(["docker", "restart", "gretl-j4-standalone"], check=True, timeout=90)
+            else:
+                kube("rollout", "restart", "statefulset/jenkins")
+                kube("rollout", "status", "statefulset/jenkins", "--timeout=150s", timeout=160)
             poll(lambda: b"Proceed" in admin.call(flow + "input/Review/", expected=(200, 404))[0])
         reviewer.call(flow + "input/Review/proceed", form, expected=(200, 302, 303))
         flow_log = finish(admin, flow, "SUCCESS", evidence)

@@ -2,6 +2,7 @@
 """Verify the Console against the installed plugin and existing k3d jobs."""
 import argparse
 import importlib.util
+import os
 import subprocess
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
@@ -16,14 +17,15 @@ spec.loader.exec_module(e2e)
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=18082)
+    parser.add_argument("--standalone", action="store_true")
     parser.add_argument("--evidence", type=Path, required=True)
     args = parser.parse_args()
     evidence = args.evidence
     evidence.mkdir(parents=True, exist_ok=True)
-    passwords = e2e.credentials()
+    passwords = e2e.credentials(args.standalone)
     base = f"http://127.0.0.1:{args.port}"
     console = base + "/gretl-console/"
-    data = e2e.ROOT.parent / "gretl-runtime-jobs/testdata"
+    data = Path(os.environ.get("JOBS_REPOSITORY", e2e.ROOT.parent / "gretl-runtime-jobs")) / "testdata"
     admin = e2e.Jenkins(args.port, "admin", passwords["admin"])
 
     with sync_playwright() as playwright:
