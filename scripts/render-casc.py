@@ -29,8 +29,11 @@ else:
     if not args.image:
         parser.error("the k3d agent image is required")
     templates = jenkins["clouds"][0]["kubernetes"]["templates"]
+    # Kubernetes Remoting reconnects using the template ID, including across CasC reloads.
+    for template in templates:
+        template["id"] = template["name"]
     templates.append({
-        "name": "gretl-j4", "label": args.label, "nodeUsageMode": "EXCLUSIVE",
+        "id": "gretl-j4", "name": "gretl-j4", "label": args.label, "nodeUsageMode": "EXCLUSIVE",
         "instanceCap": 2, "idleMinutes": 0, "agentContainer": "gretl", "agentInjection": True,
         "yaml": yaml.safe_dump({
             "apiVersion": "v1", "kind": "Pod",
