@@ -64,7 +64,7 @@ def main():
         agent, workspace = re.search(r"Running on (\S+) in (\S+)", log).groups()
         if args.standalone:
             processes = subprocess.check_output(
-                ["docker", "top", "gretl-j4-standalone-agent", "-eo", "args"], text=True
+                ["docker", "top", "gretl-j4-standalone-agent", "-eo", "pid,args"], text=True
             )
             assert not any(workspace in line and "ch.so.agi.gretl.cli.Main" in line
                            for line in processes.splitlines())
