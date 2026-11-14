@@ -26,3 +26,7 @@ if not secret or len(secret) != 64:
 print("JENKINS_SECRET=" + secret)
 print("JENKINS_AGENT_NAME=" + agent)
 print("JENKINS_WEB_SOCKET=true")
+
+# At boot JCasC's seed can precede the loading of older jobs from disk.
+# Reapply it after startup so catalog withdrawal sees those existing jobs.
+admin.call("/configuration-as-code/reload", {}, expected=(200, 302, 303))
