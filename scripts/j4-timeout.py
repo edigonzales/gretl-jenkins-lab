@@ -4,6 +4,8 @@ import argparse
 import importlib.util
 import json
 import os
+import re
+import subprocess
 from pathlib import Path
 from urllib.request import Request
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -59,6 +61,15 @@ def main():
         assert "ACCEPTANCE_PROCESS_STARTED" in log
         assert "ACCEPTANCE_PROCESS_FINISHED" not in log
         assert "Cancelling nested steps due to timeout" in log
+        agent, workspace = re.search(r"Running on (\S+) in (\S+)", log).groups()
+        if args.standalone:
+            processes = subprocess.check_output(
+                ["docker", "top", "gretl-j4-standalone-agent", "-eo", "args"], text=True
+            )
+            assert not any(workspace in line and "ch.so.agi.gretl.cli.Main" in line
+                           for line in processes.splitlines())
+        else:
+            e2e.poll(lambda: agent not in e2e.kube("get", "pods", "-o", "name"), seconds=150)
     finally:
         admin.call(f"/job/{name}/doDelete", {}, expected=(302, 303, 404))
 
