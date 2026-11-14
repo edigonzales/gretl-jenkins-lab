@@ -97,7 +97,7 @@ def main():
     review = {"json": json.dumps({"parameter": [{"name": "publicationNote", "value": "Development review"}]}),
               "proceed": "Proceed"}
     denied, _ = operator.call(flow + "input/Review/proceed", review, expected=(400, 403, 404))
-    assert b"You need to be" in denied or b"Not Found" in denied
+    assert b"You need to be" in denied or b"not found" in denied.lower()
     reviewer.call(flow + "input/Review/proceed", review, expected=(200, 302, 303))
     log = e2e.finish(admin, flow, "SUCCESS", args.evidence)
     assert "J4 branch marker prepare" in log
