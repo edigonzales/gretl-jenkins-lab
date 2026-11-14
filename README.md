@@ -145,3 +145,50 @@ aus J2.
 .local/j2-browser/bin/python scripts/j3-browser.py --port 18082 \
   --evidence ../gretl-jenkins-spec/evidence/j3/browser
 ```
+
+## J4 mit GRETL 6
+
+Katalog und Pipeline sind in beiden Umgebungen gleich. Das Agent-Image
+verwendet Java 25 und die Distribution des generischen GRETL-6-Images.
+Erstelle zuerst das HPI mit `mvn -B -ntp verify` im
+[GRETL Console Repository](https://github.com/edigonzales/gretl-jenkins-plugin).
+
+### Standalone
+
+Starte in diesem Repository `./scripts/standalone-up.sh`. Das Skript
+verwendet den dedizierten Lima-Docker, ein eigenes Netzwerk und ein
+Jenkins-Datenvolume. Mit `./scripts/standalone-open.sh` erreichst du die
+Console unter `http://127.0.0.1:18083/gretl-console/`. Die Testzugänge liegen
+in der lokalen Datei `.local/standalone/users.env`. Mit
+`./scripts/standalone-test.sh /absoluter/evidence-pfad` prüfst du
+Upload, Publikation, Freigabe und Neustart. `./scripts/standalone-down.sh`
+stoppt Controller und Agent und behält das Jenkins-Datenvolume.
+
+### k3d
+
+`./scripts/up.sh` startet das Labor. Installiere das HPI mit
+`./scripts/install-console.sh`, provisioniere die Jobs mit
+`./scripts/deploy-jobs.sh` und öffne den Port mit `./scripts/open.sh 18082`.
+Die Console ist unter `http://127.0.0.1:18082/gretl-console/` verfügbar.
+`./scripts/smoke.sh 18082` prüft die historischen Benchmark-Fixtures.
+
+### Katalog und Branches
+
+Beide Installationen verwenden standardmässig den Git-Commit aus
+`jenkins/j2-jobs-ref`. `JOBS_REF` wählt beim administrativen Deployment
+einen anderen bereits veröffentlichten Katalogstand. `GRETL_AGENT_LABEL`
+wählt das Agent-Label aus der Deployment-Konfiguration.
+
+In der Console lädt der Operator seine CSV-Datei im Job **CSV prüfen und
+veröffentlichen** hoch. Der Reviewer öffnet die Freigabe des Runs, prüft
+den Bericht und trägt den Publikationshinweis ein. Der Run archiviert
+die veröffentlichte CSV und das Manifest.
+
+Der Entwicklungsmodus des Labors erzeugt für jede veröffentlichte
+Katalogdefinition einen separaten Administrator-Job. Löse in der
+Branch-Vorschau einen Branch auf und wähle **Mit diesem Branch starten**.
+Jenkins pinnt die ausgewählte Spitze vor der GRETL-Ausführung und
+vergleicht den relevanten Schema-V2-Vertrag mit dem Deployment. Setze
+`GRETL_DEV_BRANCHES_ENABLED=false` bei der Provisionierung, um die
+Entwickler-Jobs zu deaktivieren. Die bestehenden Run-Historien bleiben
+in Jenkins erhalten. Setze diesen Wert für Produktionsdeployments.

@@ -46,5 +46,6 @@ if [[ $platform == k3d ]]; then
     k3d image import "$agent" --cluster "$lab"
     ./scripts/configure-j2.sh "$candidate" "$agent"
 else
+    mkdir -p .local/standalone
     cp "$candidate" .local/standalone/jobs.yaml
 fi

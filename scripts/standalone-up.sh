@@ -43,7 +43,10 @@ docker volume create "$name" >/dev/null
 ./scripts/standalone-down.sh
 docker run -d --name "$name" --network "$name" --publish "127.0.0.1:$port:8080" \
   --env-file .local/standalone/users.env --volume "$name:/var/jenkins_home" gretl-j4-controller:local >/dev/null
-"$python" scripts/standalone-agent.py "$port" > .local/standalone/agent.env
-docker run -d --name "$name-agent" --network "$name" --env-file .local/standalone/agent.env \
+if ! "$python" scripts/standalone-agent.py "$port" > .local/standalone/agent.env; then
+    docker logs --tail 80 "$name" >&2
+    exit 1
+fi
+docker run -d --name "$name-agent" --network "$name" --restart unless-stopped --env-file .local/standalone/agent.env \
   --env "JENKINS_URL=http://$name:8080/" gretl-j4-agent:local >/dev/null
 echo "GRETL Console http://127.0.0.1:$port/gretl-console/"
